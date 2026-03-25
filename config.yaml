@@ -1,0 +1,9 @@
+# Relay Chat Server Configuration
+host: "0.0.0.0"
+port: "8080"
+database_path: "relay.db"
+jwt_secret: "change-me-in-production-use-a-random-string"
+upload_dir: "uploads"
+max_upload_mb: 50
+tls_cert: "certs/cert.pem"
+tls_key: "certs/key.pem"

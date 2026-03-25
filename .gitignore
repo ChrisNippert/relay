@@ -1,0 +1,29 @@
+# Binary
+bin/
+relay
+
+# Database
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Uploads
+uploads/
+
+# TLS certs
+certs/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Go
+vendor/
+
+# Node
+node_modules/
+dist/
