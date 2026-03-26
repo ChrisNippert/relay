@@ -121,7 +121,7 @@ const YOUTUBE_RE = /(?:youtube\.com\/watch\?.*v=|youtu\.be\/)([\w-]{11})/
 // Global OG cache shared across all messages
 const ogCache = new Map<string, api.OGData | null>()
 
-function LinkEmbed({ url }: { url: string }) {
+function LinkEmbed({ url, onImageLoad }: { url: string; onImageLoad?: () => void }) {
   const [og, setOG] = useState<api.OGData | null>(null)
   const [loaded, setLoaded] = useState(false)
 
@@ -172,7 +172,7 @@ function LinkEmbed({ url }: { url: string }) {
         </div>
       ) : og.image ? (
         <a href={url} target="_blank" rel="noreferrer noopener">
-          <img src={og.image} alt="" className="rich-embed-thumb" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+          <img src={og.image} alt="" className="rich-embed-thumb" onLoad={onImageLoad} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
         </a>
       ) : null}
     </div>
@@ -367,6 +367,15 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     }
   }, [messages])
 
+  // Re-scroll to bottom when images/media load (they change scroll height)
+  const handleMediaLoad = useCallback(() => {
+    if (isAtBottomRef.current) {
+      requestAnimationFrame(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+      })
+    }
+  }, [])
+
   // Infinite scroll: load older messages when scrolling to top
   const handleScroll = useCallback(() => {
     const list = listRef.current
@@ -540,6 +549,22 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     e.target.value = ''
   }
 
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    const files: File[] = []
+    for (const item of items) {
+      if (item.kind === 'file') {
+        const file = item.getAsFile()
+        if (file) files.push(file)
+      }
+    }
+    if (files.length > 0) {
+      e.preventDefault()
+      startUpload(files)
+    }
+  }, [startUpload])
+
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -654,7 +679,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                   <button className="msg-action-btn" onClick={() => handleHistoryClick(m)} title="View history">🕐</button>
                 )}
                 {m.user_id === user?.id && !m.deleted && (
-                  <button className="msg-action-btn" onClick={() => handleEdit(m)} title="Edit">✏</button>
+                  <button className="msg-action-btn" onClick={() => handleEdit(m)} title="Edit">📝</button>
                 )}
                 {m.user_id === user?.id && !m.deleted && (
                   <button className="msg-action-btn msg-action-delete" onClick={() => handleDelete(m)} title="Delete">🗑</button>
@@ -724,7 +749,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                       const isAudio = /^audio\//i.test(a.mime_type)
                       if (isImage) return (
                         <a key={a.id} href={api.fileURL(a.id)} target="_blank" rel="noreferrer">
-                          <img src={api.fileURL(a.id)} alt={a.filename} className="attachment-image" />
+                          <img src={api.fileURL(a.id)} alt={a.filename} className="attachment-image" onLoad={handleMediaLoad} />
                         </a>
                       )
                       if (isVideo) return (
@@ -745,7 +770,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                   <div className="message-embeds">
                     {embedImages.map((url, i) => (
                       <a key={i} href={url} target="_blank" rel="noreferrer">
-                        <img src={url} alt="" className="embed-image" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                        <img src={url} alt="" className="embed-image" onLoad={handleMediaLoad} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
                       </a>
                     ))}
                   </div>
@@ -753,7 +778,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                 {embedLinks.length > 0 && (
                   <div className="message-embeds">
                     {embedLinks.map((url, i) => (
-                      <LinkEmbed key={i} url={url} />
+                      <LinkEmbed key={i} url={url} onImageLoad={handleMediaLoad} />
                     ))}
                   </div>
                 )}
@@ -820,6 +845,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
             ref={inputRef}
             value={input}
             onChange={(e) => handleInput(e.target.value)}
+            onPaste={handlePaste}
             placeholder={editingMsg ? 'Edit message…' : `Message ${channel.server_id ? '#' + channel.name : (dmPartnerName || channel.name || 'this channel')}`}
             autoFocus
             rows={1}

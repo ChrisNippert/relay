@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { Channel } from '../types'
 import * as api from '../services/api'
 import ChannelSettings from './ChannelSettings'
@@ -141,13 +142,14 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
         </>
       )}
 
-      {settingsChannel && (
+      {settingsChannel && createPortal(
         <ChannelSettings
           channel={settingsChannel}
           onClose={() => setSettingsChannel(null)}
           onChannelUpdated={() => { setSettingsChannel(null); onChannelsChanged?.() }}
           onChannelDeleted={() => { setSettingsChannel(null); onChannelsChanged?.() }}
-        />
+        />,
+        document.body
       )}
     </div>
   )
