@@ -2,26 +2,27 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import type { User } from '../types'
 import * as api from '../services/api'
 import { connect, disconnect } from '../services/ws'
-import { generateKeyPair } from '../services/crypto'
+import { generateKeyPair, publicKeyFromPrivate } from '../services/crypto'
 
 const PRIVKEY_STORAGE = 'relay_e2e_privkey'
 
 async function ensureKeyPair() {
   const existing = localStorage.getItem(PRIVKEY_STORAGE)
   if (existing) {
-    // Already have a keypair; check if server has our public key
+    // Have a local private key — derive its public key and verify it matches the server
     const me = await api.getMe()
-    if (!me.public_key) {
-      const kp = await generateKeyPair()
-      localStorage.setItem(PRIVKEY_STORAGE, kp.privateKey)
-      await api.updatePublicKey(kp.publicKey)
-    }
+    const localPub = await publicKeyFromPrivate(existing)
+    if (me.public_key === localPub) return // keys are in sync
+    // Mismatch or server has no key — re-upload the public key derived from our local private key
+    await api.updatePublicKey(localPub)
     return
   }
-  // Generate fresh keypair
+  // No local key (new device) — generate fresh keypair
   const kp = await generateKeyPair()
   localStorage.setItem(PRIVKEY_STORAGE, kp.privateKey)
   await api.updatePublicKey(kp.publicKey)
+  // Invalidate old channel key entries (encrypted for previous keypair)
+  await api.deleteMyChannelKeys().catch(() => {})
 }
 
 export function getPrivateKey(): string | null {

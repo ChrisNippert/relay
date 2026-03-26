@@ -22,6 +22,29 @@ export async function isChannelEncrypted(channelId: string): Promise<boolean> {
 }
 
 /**
+ * Parse an encrypted_key blob.
+ * New format: "pk.BASE64_SENDER_PUBKEY:nonce.ciphertext"
+ * Old format: "senderUserId:nonce.ciphertext"
+ */
+function parseEncryptedKey(encryptedKey: string): { senderPubKey?: string; senderUserId?: string; nonce: string; ciphertext: string } | null {
+  const colonIdx = encryptedKey.indexOf(':')
+  if (colonIdx === -1) return null
+
+  const prefix = encryptedKey.slice(0, colonIdx)
+  const rest = encryptedKey.slice(colonIdx + 1)
+  const dotIdx = rest.indexOf('.')
+  if (dotIdx === -1) return null
+
+  const nonce = rest.slice(0, dotIdx)
+  const ciphertext = rest.slice(dotIdx + 1)
+
+  if (prefix.startsWith('pk.')) {
+    return { senderPubKey: prefix.slice(3), nonce, ciphertext }
+  }
+  return { senderUserId: prefix, nonce, ciphertext }
+}
+
+/**
  * Get the decrypted channel key, loading from server if needed.
  * Returns null if no key exists for this user/channel.
  */
@@ -38,25 +61,25 @@ export async function getChannelKey(channelId: string): Promise<CryptoKey | null
     const myEntry = keys.find(k => k.user_id === me.id)
     if (!myEntry) return null
 
-    // encrypted_key format: "senderUserId:nonce.ciphertext"
-    const colonIdx = myEntry.encrypted_key.indexOf(':')
-    if (colonIdx === -1) return null
-    const senderUserId = myEntry.encrypted_key.slice(0, colonIdx)
-    const rest = myEntry.encrypted_key.slice(colonIdx + 1)
+    const parsed = parseEncryptedKey(myEntry.encrypted_key)
+    if (!parsed) return null
 
-    const dotIdx = rest.indexOf('.')
-    if (dotIdx === -1) return null
-    const nonce = rest.slice(0, dotIdx)
-    const ciphertext = rest.slice(dotIdx + 1)
-
-    const sender = await api.getUser(senderUserId)
-    if (!sender.public_key) return null
+    let senderPubKey: string | undefined
+    if (parsed.senderPubKey) {
+      // New format — public key is embedded
+      senderPubKey = parsed.senderPubKey
+    } else if (parsed.senderUserId) {
+      // Old format — look up sender's current public key (may fail if they regenerated)
+      const sender = await api.getUser(parsed.senderUserId)
+      senderPubKey = sender.public_key
+    }
+    if (!senderPubKey) return null
 
     // Derive shared secret: our private key + sender's public key
-    const sharedKey = await crypto.deriveSharedKey(privKey, sender.public_key)
+    const sharedKey = await crypto.deriveSharedKey(privKey, senderPubKey)
 
     // Decrypt the channel key (the plaintext is the base64 raw AES key)
-    const channelKeyB64 = await crypto.decrypt(sharedKey, ciphertext, nonce)
+    const channelKeyB64 = await crypto.decrypt(sharedKey, parsed.ciphertext, parsed.nonce)
     const channelKey = await crypto.importKey(channelKeyB64)
 
     channelKeyCache.set(channelId, channelKey)
@@ -68,6 +91,16 @@ export async function getChannelKey(channelId: string): Promise<CryptoKey | null
 }
 
 /**
+ * Build an encrypted_key blob using the new format (embeds sender's public key).
+ */
+async function buildEncryptedKey(privKey: string, recipientPubKey: string, channelKeyB64: string): Promise<string> {
+  const myPubKey = await crypto.publicKeyFromPrivate(privKey)
+  const sharedKey = await crypto.deriveSharedKey(privKey, recipientPubKey)
+  const { ciphertext, nonce } = await crypto.encrypt(sharedKey, channelKeyB64)
+  return `pk.${myPubKey}:${nonce}.${ciphertext}`
+}
+
+/**
  * Enable E2E encryption for a channel.
  * Generates a random channel key, encrypts it for every member, stores on server.
  */
@@ -76,8 +109,6 @@ export async function enableEncryption(channelId: string, serverId?: string): Pr
   if (!privKey) return false
 
   try {
-    const me = await api.getMe()
-
     // Generate a random AES-256-GCM channel key
     const channelKey = await crypto.generateChannelKey()
     const channelKeyB64 = await crypto.exportKey(channelKey)
@@ -96,14 +127,7 @@ export async function enableEncryption(channelId: string, serverId?: string): Pr
       const member = await api.getUser(memberId)
       if (!member.public_key) continue
 
-      // Derive shared secret: our private key + their public key
-      const sharedKey = await crypto.deriveSharedKey(privKey, member.public_key)
-
-      // Encrypt the channel key
-      const { ciphertext, nonce } = await crypto.encrypt(sharedKey, channelKeyB64)
-
-      // Store as "myUserId:nonce.ciphertext" for that member
-      const encryptedKey = `${me.id}:${nonce}.${ciphertext}`
+      const encryptedKey = await buildEncryptedKey(privKey, member.public_key, channelKeyB64)
       await api.setChannelKey(channelId, encryptedKey, memberId)
     }
 
@@ -116,10 +140,8 @@ export async function enableEncryption(channelId: string, serverId?: string): Pr
 }
 
 /**
- * Redistribute the channel key to any members who are missing it.
- * Called when a user who has the key opens an encrypted channel.
- * This handles the case where encryption was enabled before a member
- * had logged in (and thus had no public key at the time).
+ * Redistribute the channel key to members who are missing it
+ * or whose key entry is stale (encrypted for a different keypair).
  */
 export async function redistributeKeys(channelId: string, serverId?: string): Promise<void> {
   const privKey = getPrivateKey()
@@ -129,9 +151,8 @@ export async function redistributeKeys(channelId: string, serverId?: string): Pr
   if (!channelKey) return
 
   try {
-    const me = await api.getMe()
     const keys = await api.getChannelKeys(channelId)
-    const usersWithKeys = new Set(keys.map(k => k.user_id))
+    const existingKeyMap = new Map(keys.map(k => [k.user_id, k.encrypted_key]))
 
     // Get all member user IDs
     let memberIds: string[]
@@ -145,14 +166,26 @@ export async function redistributeKeys(channelId: string, serverId?: string): Pr
     const channelKeyB64 = await crypto.exportKey(channelKey)
 
     for (const memberId of memberIds) {
-      if (usersWithKeys.has(memberId)) continue
-
       const member = await api.getUser(memberId)
       if (!member.public_key) continue
 
-      const sharedKey = await crypto.deriveSharedKey(privKey, member.public_key)
-      const { ciphertext, nonce } = await crypto.encrypt(sharedKey, channelKeyB64)
-      const encryptedKey = `${me.id}:${nonce}.${ciphertext}`
+      const existing = existingKeyMap.get(memberId)
+      if (existing) {
+        // Check if the existing entry was encrypted with the member's current keypair.
+        // The entry stores the SENDER's public key, and ECDH was done with the member's
+        // public key at the time. If the member has since changed keys, we need to re-encrypt.
+        // We can detect this by trying: if the entry uses old format (userId-based),
+        // upgrade it to new format. For new format entries, they'll work as long as
+        // the member's private key hasn't changed — which we can't check from here.
+        // But if the member deleted their old entries (via ensureKeyPair), they won't
+        // have an entry at all, so this branch won't fire.
+        // For robustness, also re-encrypt old-format entries to use the new pk. format.
+        const parsed = parseEncryptedKey(existing)
+        if (parsed && parsed.senderPubKey) continue // already new format, likely valid
+        // Old format — upgrade to new format with embedded public key
+      }
+
+      const encryptedKey = await buildEncryptedKey(privKey, member.public_key, channelKeyB64)
       await api.setChannelKey(channelId, encryptedKey, memberId)
     }
   } catch (e) {

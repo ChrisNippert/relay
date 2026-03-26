@@ -34,6 +34,16 @@ func GetChannelKeysHandler(database *db.DB) http.HandlerFunc {
 	}
 }
 
+func DeleteMyChannelKeysHandler(database *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := database.DeleteChannelKeysForUser(GetUserID(r)); err != nil {
+			http.Error(w, `{"error":"failed to delete keys"}`, http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
 type setKeyRequest struct {
 	EncryptedKey string `json:"encrypted_key"`
 	UserID       string `json:"user_id,omitempty"` // optional: set key for another member

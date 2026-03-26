@@ -103,6 +103,7 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		// Channel keys (E2E encryption)
 		r.Get("/api/channels/{channelID}/keys", GetChannelKeysHandler(database))
 		r.Post("/api/channels/{channelID}/keys", SetChannelKeyHandler(database))
+		r.Delete("/api/users/me/channel-keys", DeleteMyChannelKeysHandler(database))
 
 		// File upload
 		r.Post("/api/upload", UploadHandler(cfg, database))

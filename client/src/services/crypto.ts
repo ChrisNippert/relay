@@ -103,6 +103,21 @@ export async function decrypt(key: CryptoKey, ciphertext: string, nonce: string)
   return new TextDecoder().decode(decrypted)
 }
 
+// Derive the public key (base64) from a private key JWK string
+export async function publicKeyFromPrivate(privateKeyJwk: string): Promise<string> {
+  const jwk = JSON.parse(privateKeyJwk)
+  const pubJwk = { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y, key_ops: [] as string[], ext: true }
+  const pubKey = await crypto.subtle.importKey(
+    'jwk',
+    pubJwk,
+    { name: 'ECDH', namedCurve: 'P-256' },
+    true,
+    []
+  )
+  const raw = await crypto.subtle.exportKey('raw', pubKey)
+  return bufToBase64(raw)
+}
+
 // Helpers
 function bufToBase64(buf: ArrayBuffer): string {
   return btoa(String.fromCharCode(...new Uint8Array(buf)))

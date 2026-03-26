@@ -204,6 +204,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
   const [members, setMembers] = useState<User[]>([])
   const [popover, setPopover] = useState<{ userId: string; rect: DOMRect } | null>(null)
   const [encrypted, setEncrypted] = useState(false)
+  const [encryptionReady, setEncryptionReady] = useState(false)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -240,10 +241,16 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
   // Check if channel has E2E encryption enabled
   useEffect(() => {
     setEncrypted(false)
-    e2e.isChannelEncrypted(channel.id).then((enc) => {
+    setEncryptionReady(false)
+    e2e.isChannelEncrypted(channel.id).then(async (enc) => {
       setEncrypted(enc)
-      // If encrypted, redistribute keys to any members missing them
-      if (enc) e2e.redistributeKeys(channel.id, channel.server_id || undefined)
+      if (enc) {
+        // Check if we actually have (or can get) the channel key
+        const key = await e2e.getChannelKey(channel.id)
+        setEncryptionReady(key !== null)
+        // Redistribute keys to any members missing them
+        e2e.redistributeKeys(channel.id, channel.server_id || undefined)
+      }
     }).catch(() => setEncrypted(false))
   }, [channel.id, channel.server_id])
 
@@ -495,8 +502,16 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     // Encrypt if E2E is enabled for this channel
     let content = text || ' '
     if (encrypted) {
+      if (!encryptionReady) {
+        alert('Encryption key not available. You cannot send messages on this encrypted channel until a member with the key comes online.')
+        return
+      }
       const enc = await e2e.encryptMessage(channel.id, content)
-      if (enc) content = enc
+      if (!enc) {
+        alert('Failed to encrypt message. Send aborted to protect your privacy.')
+        return
+      }
+      content = enc
     }
 
     sendChatMessage(channel.id, content, undefined, attachmentIds.length ? attachmentIds : undefined, replyingTo?.id)
@@ -671,7 +686,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
       <div className="chat-header">
         <span className="chat-header-name">
           {channel.server_id ? '#' : '💬'} {channel.server_id ? channel.name : (dmPartnerName || channel.name)}
-          {encrypted && <span className="chat-header-lock" title="End-to-end encrypted">🔒</span>}
+          {encrypted && <span className="chat-header-lock" title={encryptionReady ? 'End-to-end encrypted' : 'Encrypted — waiting for key'}>{encryptionReady ? '🔒' : '🔓'}</span>}
         </span>
         <div className="chat-header-actions">
           <button className="chat-call-btn" onClick={() => setSearchOpen((p) => { if (p) closeSearch(); return !p })} title="Search Messages">
@@ -957,7 +972,8 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
             value={input}
             onChange={(e) => handleInput(e.target.value)}
             onPaste={handlePaste}
-            placeholder={`Message ${channel.server_id ? '#' + channel.name : (dmPartnerName || channel.name || 'this channel')}`}
+            placeholder={encrypted && !encryptionReady ? '🔓 Waiting for encryption key...' : `Message ${channel.server_id ? '#' + channel.name : (dmPartnerName || channel.name || 'this channel')}`}
+            disabled={encrypted && !encryptionReady}
             autoFocus
             rows={1}
             className="message-textarea"
