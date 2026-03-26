@@ -14,11 +14,7 @@ export default defineConfig({
       '/api': {
         target: 'https://localhost:8080',
         secure: false,
-      },
-      '/ws': {
-        target: 'wss://localhost:8080',
         ws: true,
-        secure: false,
       },
       '/uploads': {
         target: 'https://localhost:8080',

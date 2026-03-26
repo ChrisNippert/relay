@@ -503,13 +503,22 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     }
   }
 
-  const hasFocused = focusedUser !== null && voiceUsers.some((u) => u.id === focusedUser)
-  const sortedUsers = hasFocused
-    ? [voiceUsers.find((u) => u.id === focusedUser)!, ...voiceUsers.filter((u) => u.id !== focusedUser)]
-    : voiceUsers
+  // Build display tiles: screen shares become their own separate tiles
+  const displayTiles: { tileId: string; userId: string; displayName: string; isSelf: boolean; speaking: boolean; type: 'user' | 'screen'; hasVideo: boolean }[] = []
+  for (const vu of voiceUsers) {
+    displayTiles.push({ tileId: vu.id, userId: vu.id, displayName: vu.displayName, isSelf: vu.isSelf, speaking: vu.speaking, type: 'user', hasVideo: vu.hasVideo })
+    if (vu.hasScreen) {
+      displayTiles.push({ tileId: `${vu.id}:screen`, userId: vu.id, displayName: vu.displayName, isSelf: vu.isSelf, speaking: false, type: 'screen', hasVideo: false })
+    }
+  }
 
-  const handleTileClick = (userId: string) => {
-    setFocusedUser((prev) => prev === userId ? null : userId)
+  const hasFocused = focusedUser !== null && displayTiles.some((t) => t.tileId === focusedUser)
+  const sortedTiles = hasFocused
+    ? [displayTiles.find((t) => t.tileId === focusedUser)!, ...displayTiles.filter((t) => t.tileId !== focusedUser)]
+    : displayTiles
+
+  const handleTileClick = (tileId: string) => {
+    setFocusedUser((prev) => prev === tileId ? null : tileId)
   }
 
   return (
@@ -520,79 +529,81 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         {connecting && <span className="voice-status connecting">Connecting…</span>}
       </div>
 
-      <div className={`voice-tile-grid ${hasFocused ? 'has-focused' : ''} count-${Math.min(voiceUsers.length, 16)}`}>
+      <div className={`voice-tile-grid ${hasFocused ? 'has-focused' : ''} count-${Math.min(displayTiles.length, 16)}`}>
         {voiceUsers.length === 0 && !joined && (
           <p className="voice-empty">No one is in this channel</p>
         )}
-        {sortedUsers.map((vu) => {
-          const hasMedia = vu.hasVideo || vu.hasScreen
-          const hasBoth = vu.hasVideo && vu.hasScreen
-          const remoteStream = remoteStreams.get(vu.id)
+        {sortedTiles.map((tile) => {
+          const remoteStream = remoteStreams.get(tile.userId)
+          const isFocused = focusedUser === tile.tileId
+          const isUnfocused = hasFocused && !isFocused
+
+          if (tile.type === 'screen') {
+            return (
+              <div
+                key={tile.tileId}
+                className={`voice-tile has-media ${isFocused ? 'focused' : ''} ${isUnfocused ? 'unfocused' : ''}`}
+                onClick={() => handleTileClick(tile.tileId)}
+              >
+                <div className="voice-tile-media">
+                  <div className="voice-tile-video-pane screen-pane">
+                    {tile.isSelf ? (
+                      <video ref={(el) => {
+                        localScreenRef.current = el
+                        if (el && screenStreamRef.current && el.srcObject !== screenStreamRef.current) {
+                          el.srcObject = screenStreamRef.current
+                        }
+                      }} autoPlay playsInline muted />
+                    ) : remoteStream ? (
+                      <video autoPlay playsInline ref={(el) => { if (el && el.srcObject !== remoteStream) el.srcObject = remoteStream }} />
+                    ) : null}
+                  </div>
+                  <div className="voice-tile-overlay">
+                    <span className="voice-tile-name">{tile.displayName}'s screen</span>
+                  </div>
+                </div>
+              </div>
+            )
+          }
 
           return (
             <div
-              key={vu.id}
-              className={`voice-tile ${vu.speaking ? 'speaking' : ''} ${vu.isSelf ? 'is-self' : ''} ${muted && vu.isSelf ? 'is-muted' : ''} ${focusedUser === vu.id ? 'focused' : ''} ${hasFocused && focusedUser !== vu.id ? 'unfocused' : ''} ${hasMedia ? 'has-media' : ''}`}
-              onClick={() => handleTileClick(vu.id)}
+              key={tile.tileId}
+              className={`voice-tile ${tile.speaking ? 'speaking' : ''} ${tile.isSelf ? 'is-self' : ''} ${muted && tile.isSelf ? 'is-muted' : ''} ${isFocused ? 'focused' : ''} ${isUnfocused ? 'unfocused' : ''} ${tile.hasVideo ? 'has-media' : ''}`}
+              onClick={() => handleTileClick(tile.tileId)}
             >
-              {hasMedia ? (
-                <div className={`voice-tile-media ${hasBoth ? 'split' : ''}`}>
-                  {vu.hasScreen && (
-                    <div className="voice-tile-video-pane screen-pane">
-                      {vu.isSelf ? (
-                        <video ref={(el) => {
-                          localScreenRef.current = el
-                          if (el && screenStreamRef.current && el.srcObject !== screenStreamRef.current) {
-                            el.srcObject = screenStreamRef.current
-                          }
-                        }} autoPlay playsInline muted />
-                      ) : remoteStream ? (
-                        <video
-                          autoPlay
-                          playsInline
-                          ref={(el) => { if (el && el.srcObject !== remoteStream) el.srcObject = remoteStream }}
-                        />
-                      ) : null}
-                      <span className="voice-tile-pane-label">Screen</span>
-                    </div>
-                  )}
-                  {vu.hasVideo && (
-                    <div className={`voice-tile-video-pane camera-pane ${hasBoth ? 'secondary' : ''}`}>
-                      {vu.isSelf ? (
-                        <video ref={(el) => {
-                          localVideoRef.current = el
-                          if (el && localStreamRef.current && el.srcObject !== localStreamRef.current) {
-                            el.srcObject = localStreamRef.current
-                          }
-                        }} autoPlay playsInline muted />
-                      ) : remoteStream ? (
-                        <video
-                          autoPlay
-                          playsInline
-                          ref={(el) => { if (el && el.srcObject !== remoteStream) el.srcObject = remoteStream }}
-                        />
-                      ) : null}
-                      {hasBoth && <span className="voice-tile-pane-label">Camera</span>}
-                    </div>
-                  )}
+              {tile.hasVideo ? (
+                <div className="voice-tile-media">
+                  <div className="voice-tile-video-pane camera-pane">
+                    {tile.isSelf ? (
+                      <video ref={(el) => {
+                        localVideoRef.current = el
+                        if (el && localStreamRef.current && el.srcObject !== localStreamRef.current) {
+                          el.srcObject = localStreamRef.current
+                        }
+                      }} autoPlay playsInline muted />
+                    ) : remoteStream ? (
+                      <video autoPlay playsInline ref={(el) => { if (el && el.srcObject !== remoteStream) el.srcObject = remoteStream }} />
+                    ) : null}
+                  </div>
                   <div className="voice-tile-overlay">
                     <span className="voice-tile-name">
-                      {vu.displayName}
-                      {vu.isSelf && <span className="voice-tile-tag"> (you)</span>}
+                      {tile.displayName}
+                      {tile.isSelf && <span className="voice-tile-tag"> (you)</span>}
                     </span>
                   </div>
                 </div>
               ) : (
                 <>
-                  <span className={`voice-tile-avatar ${vu.speaking ? 'speaking' : ''}`}>
-                    {vu.displayName.charAt(0).toUpperCase()}
+                  <span className={`voice-tile-avatar ${tile.speaking ? 'speaking' : ''}`}>
+                    {tile.displayName.charAt(0).toUpperCase()}
                   </span>
                   <span className="voice-tile-name">
-                    {vu.displayName}
-                    {vu.isSelf && <span className="voice-tile-tag"> (you)</span>}
+                    {tile.displayName}
+                    {tile.isSelf && <span className="voice-tile-tag"> (you)</span>}
                   </span>
                   <div className="voice-tile-badges">
-                    {muted && vu.isSelf && <span className="voice-tile-badge muted" title="Muted">🔇</span>}
+                    {muted && tile.isSelf && <span className="voice-tile-badge muted" title="Muted">🔇</span>}
                   </div>
                 </>
               )}

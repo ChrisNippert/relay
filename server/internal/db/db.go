@@ -11,13 +11,16 @@ type DB struct {
 }
 
 func New(path string) (*DB, error) {
-	sqlDB, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
+	sqlDB, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
 
-	// SQLite performs best with limited connections
-	sqlDB.SetMaxOpenConns(1)
+	// Allow a small pool so HTTP handlers and the WS hub don't deadlock
+	// each other on the single connection. SQLite WAL mode supports
+	// concurrent readers with one writer.
+	sqlDB.SetMaxOpenConns(4)
+	sqlDB.SetMaxIdleConns(2)
 
 	db := &DB{sqlDB}
 	if err := db.migrate(); err != nil {
@@ -94,13 +97,24 @@ CREATE TABLE IF NOT EXISTS messages (
     content TEXT NOT NULL,
     nonce TEXT DEFAULT '',
     type TEXT DEFAULT 'text',
+    reply_to_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+    edited INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS attachments (
+CREATE TABLE IF NOT EXISTS message_edits (
     id TEXT PRIMARY KEY,
     message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    edited_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_message_edits_message ON message_edits(message_id, edited_at);
+
+CREATE TABLE IF NOT EXISTS attachments (
+    id TEXT PRIMARY KEY,
+    message_id TEXT REFERENCES messages(id) ON DELETE CASCADE,
     filename TEXT NOT NULL,
     file_path TEXT NOT NULL,
     file_size INTEGER NOT NULL,

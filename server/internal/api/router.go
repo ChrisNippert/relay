@@ -37,6 +37,7 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 
 	// WebSocket (authenticated via query param token)
 	r.Get("/ws", ws.HandleWebSocket(hub, cfg))
+	r.Get("/api/ws", ws.HandleWebSocket(hub, cfg))
 
 	// Authenticated routes
 	r.Group(func(r chi.Router) {
@@ -83,6 +84,8 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 
 		// Messages
 		r.Get("/api/channels/{channelID}/messages", GetMessagesHandler(database))
+		r.Put("/api/messages/{messageID}", EditMessageHandler(database))
+		r.Get("/api/messages/{messageID}/history", GetEditHistoryHandler(database))
 
 		// Voice state
 		r.Get("/api/channels/{channelID}/voice-users", GetVoiceUsersHandler(hub))

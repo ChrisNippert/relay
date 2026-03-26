@@ -52,10 +52,21 @@ export interface Message {
   content: string
   nonce?: string
   type: string
+  reply_to_id?: string
+  reply_to?: Message
+  edited: boolean
   created_at: string
   updated_at: string
   attachments?: Attachment[]
   author?: User
+  edit_history?: MessageEdit[]
+}
+
+export interface MessageEdit {
+  id: string
+  message_id: string
+  content: string
+  edited_at: string
 }
 
 export interface Attachment {

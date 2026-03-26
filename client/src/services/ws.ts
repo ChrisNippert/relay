@@ -18,7 +18,7 @@ export function connect() {
   }
 
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(token)}`)
+  ws = new WebSocket(`${proto}://${location.host}/api/ws?token=${encodeURIComponent(token)}`)
 
   ws.onopen = () => {
     console.log('WebSocket connected')
@@ -74,8 +74,12 @@ export function subscribe(handler: MessageHandler): () => void {
 }
 
 // Convenience senders
-export function sendChatMessage(channelId: string, content: string, nonce?: string, attachmentIds?: string[]) {
-  send('chat_message', { channel_id: channelId, content, nonce, type: 'text', attachment_ids: attachmentIds })
+export function sendChatMessage(channelId: string, content: string, nonce?: string, attachmentIds?: string[], replyToId?: string) {
+  send('chat_message', { channel_id: channelId, content, nonce, type: 'text', attachment_ids: attachmentIds, reply_to_id: replyToId })
+}
+
+export function sendEditMessage(messageId: string, content: string) {
+  send('edit_message', { message_id: messageId, content })
 }
 
 export function sendTypingStart(channelId: string) {

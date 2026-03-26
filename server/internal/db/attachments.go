@@ -1,11 +1,17 @@
 package db
 
-import "github.com/relay-chat/relay/internal/models"
+import (
+	"github.com/relay-chat/relay/internal/models"
+)
 
 func (db *DB) CreateAttachment(id, messageID, filename, filePath string, fileSize int64, mimeType string) error {
+	var msgID interface{}
+	if messageID != "" {
+		msgID = messageID
+	}
 	_, err := db.Exec(
 		`INSERT INTO attachments (id, message_id, filename, file_path, file_size, mime_type) VALUES (?, ?, ?, ?, ?, ?)`,
-		id, messageID, filename, filePath, fileSize, mimeType,
+		id, msgID, filename, filePath, fileSize, mimeType,
 	)
 	return err
 }

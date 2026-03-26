@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ChangeEvent } from 'react'
+import { useEffect, useRef, useState, useCallback, type FormEvent, type ChangeEvent } from 'react'
 import type { Channel, Message, WSMessage as WSMsg } from '../types'
 import * as api from '../services/api'
 import { sendChatMessage, sendTypingStart, sendTypingStop, subscribe } from '../services/ws'
@@ -20,16 +20,41 @@ function isImageUrl(url: string): boolean {
   return IMAGE_EXT.test(url)
 }
 
+// Formatting: ||spoilers||, *italics*, **bold**, ~~strikethrough~~, `code`
+function renderFormattedText(text: string, keyPrefix: string): (string | React.ReactElement)[] {
+  const FORMAT_REGEX = /(\|\|.+?\|\||\*\*.+?\*\*|\*.+?\*|~~.+?~~|`.+?`)/g
+  const parts = text.split(FORMAT_REGEX)
+  return parts.map((part, i) => {
+    if (part.startsWith('||') && part.endsWith('||')) {
+      const inner = part.slice(2, -2)
+      return <span key={`${keyPrefix}-${i}`} className="spoiler" onClick={(e) => (e.currentTarget.classList.toggle('revealed'))}>{inner}</span>
+    }
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={`${keyPrefix}-${i}`}>{part.slice(2, -2)}</strong>
+    }
+    if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
+      return <em key={`${keyPrefix}-${i}`}>{part.slice(1, -1)}</em>
+    }
+    if (part.startsWith('~~') && part.endsWith('~~')) {
+      return <s key={`${keyPrefix}-${i}`}>{part.slice(2, -2)}</s>
+    }
+    if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
+      return <code key={`${keyPrefix}-${i}`} className="inline-code">{part.slice(1, -1)}</code>
+    }
+    return part
+  })
+}
+
 function renderMessageContent(content: string) {
   const parts = content.split(URL_REGEX)
   const urls = content.match(URL_REGEX) || []
   const result: (string | React.ReactElement)[] = []
 
   parts.forEach((part, i) => {
-    if (part) result.push(part)
+    if (part) result.push(...renderFormattedText(part, `f${i}`))
     if (urls[i]) {
       result.push(
-        <a key={i} href={urls[i]} target="_blank" rel="noreferrer noopener" className="message-link">
+        <a key={`u${i}`} href={urls[i]} target="_blank" rel="noreferrer noopener" className="message-link">
           {urls[i]}
         </a>
       )
@@ -42,13 +67,18 @@ export default function ChatView({ channel, onStartCall }: Props) {
   const { user } = useAuth()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
-  const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set())
+  const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map())
   const [dmPartnerId, setDmPartnerId] = useState<string | null>(null)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
   const typingTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const initialLoadRef = useRef(true)
+  const userNameCache = useRef<Map<string, string>>(new Map())
 
   // Resolve DM partner for call buttons
   useEffect(() => {
@@ -62,9 +92,25 @@ export default function ChatView({ channel, onStartCall }: Props) {
     }
   }, [channel.id, channel.server_id, user?.id, onStartCall])
 
+  // Helper to resolve user ID to display name
+  const resolveUserName = useCallback(async (userId: string): Promise<string> => {
+    const cached = userNameCache.current.get(userId)
+    if (cached) return cached
+    try {
+      const u = await api.getUser(userId)
+      const name = u.display_name || u.username
+      userNameCache.current.set(userId, name)
+      return name
+    } catch {
+      return userId.slice(0, 8)
+    }
+  }, [])
+
   // Load messages on channel change
   useEffect(() => {
     setMessages([])
+    setHasMore(true)
+    initialLoadRef.current = true
     api.getMessages(channel.id).then((msgs) => {
       setMessages(msgs.reverse()) // API returns DESC, we want ASC
     }).catch(console.error)
@@ -79,7 +125,7 @@ export default function ChatView({ channel, onStartCall }: Props) {
           setMessages((prev) => prev.some((x) => x.id === m.id) ? prev : [...prev, m])
           // Remove sender from typing
           setTypingUsers((prev) => {
-            const next = new Set(prev)
+            const next = new Map(prev)
             next.delete(m.user_id)
             return next
           })
@@ -87,13 +133,15 @@ export default function ChatView({ channel, onStartCall }: Props) {
       } else if (msg.type === 'typing_start') {
         const p = msg.payload as { channel_id: string; user_id: string }
         if (p.channel_id === channel.id && p.user_id !== user?.id) {
-          setTypingUsers((prev) => new Set(prev).add(p.user_id))
+          resolveUserName(p.user_id).then((name) => {
+            setTypingUsers((prev) => new Map(prev).set(p.user_id, name))
+          })
         }
       } else if (msg.type === 'typing_stop') {
         const p = msg.payload as { channel_id: string; user_id: string }
         if (p.channel_id === channel.id) {
           setTypingUsers((prev) => {
-            const next = new Set(prev)
+            const next = new Map(prev)
             next.delete(p.user_id)
             return next
           })
@@ -101,12 +149,45 @@ export default function ChatView({ channel, onStartCall }: Props) {
       }
     })
     return unsub
-  }, [channel.id, user?.id])
+  }, [channel.id, user?.id, resolveUserName])
 
-  // Auto-scroll to bottom
+  // Scroll to bottom on initial load; smooth-scroll for new messages
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (initialLoadRef.current && messages.length > 0) {
+      initialLoadRef.current = false
+      bottomRef.current?.scrollIntoView()
+    } else {
+      // Only auto-scroll if user is near bottom
+      const list = listRef.current
+      if (list) {
+        const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 150
+        if (atBottom) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+      }
+    }
   }, [messages])
+
+  // Infinite scroll: load older messages when scrolling to top
+  const handleScroll = useCallback(() => {
+    const list = listRef.current
+    if (!list || loadingOlder || !hasMore) return
+    if (list.scrollTop < 100) {
+      setLoadingOlder(true)
+      const prevHeight = list.scrollHeight
+      api.getMessages(channel.id, 50, messages.length)
+        .then((older) => {
+          if (older.length < 50) setHasMore(false)
+          if (older.length > 0) {
+            setMessages((prev) => [...older.reverse(), ...prev])
+            // Preserve scroll position after prepending
+            requestAnimationFrame(() => {
+              list.scrollTop = list.scrollHeight - prevHeight
+            })
+          }
+        })
+        .catch(console.error)
+        .finally(() => setLoadingOlder(false))
+    }
+  }, [channel.id, messages.length, loadingOlder, hasMore])
 
   const handleInput = (value: string) => {
     setInput(value)
@@ -180,18 +261,24 @@ export default function ChatView({ channel, onStartCall }: Props) {
         )}
       </div>
 
-      <div className="message-list">
-        {messages.map((m) => {
+      <div className="message-list" ref={listRef} onScroll={handleScroll}>
+        {loadingOlder && <div className="loading-older">Loading older messages...</div>}
+        {messages.map((m, i) => {
           const urls = extractUrls(m.content)
           const embedImages = urls.filter(isImageUrl)
           const embedLinks = urls.filter((u) => !isImageUrl(u))
+          const prev = messages[i - 1]
+          const isGrouped = prev && prev.user_id === m.user_id &&
+            new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < 5 * 60 * 1000
 
           return (
-            <div key={m.id} className={`message ${m.user_id === user?.id ? 'own' : ''}`}>
-              <div className="message-header">
-                <span className="message-author">{m.author?.display_name ?? m.user_id}</span>
-                <span className="message-time">{formatTime(m.created_at)}</span>
-              </div>
+            <div key={m.id} className={`message ${m.user_id === user?.id ? 'own' : ''} ${isGrouped ? 'grouped' : ''}`}>
+              {!isGrouped && (
+                <div className="message-header">
+                  <span className="message-author">{m.author?.display_name ?? m.user_id}</span>
+                  <span className="message-time">{formatTime(m.created_at)}</span>
+                </div>
+              )}
               <div className="message-body">{renderMessageContent(m.content)}</div>
               {m.attachments && m.attachments.length > 0 && (
                 <div className="message-attachments">
@@ -235,7 +322,7 @@ export default function ChatView({ channel, onStartCall }: Props) {
 
       {typingUsers.size > 0 && (
         <div className="typing-indicator">
-          {Array.from(typingUsers).join(', ')} typing...
+          {Array.from(typingUsers.values()).join(', ')} typing...
         </div>
       )}
 

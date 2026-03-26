@@ -70,6 +70,8 @@ func handleMessage(c *Client, raw []byte) {
 	switch msg.Type {
 	case "chat_message":
 		handleChatMessage(c, msg.Payload)
+	case "edit_message":
+		handleEditMessage(c, msg.Payload)
 	case "typing_start":
 		handleTyping(c, msg.Payload, true)
 	case "typing_stop":
@@ -91,6 +93,7 @@ type chatMessagePayload struct {
 	Nonce         string   `json:"nonce"`
 	Type          string   `json:"type"`
 	AttachmentIDs []string `json:"attachment_ids"`
+	ReplyToID     *string  `json:"reply_to_id,omitempty"`
 }
 
 func handleChatMessage(c *Client, payload json.RawMessage) {
@@ -118,7 +121,7 @@ func handleChatMessage(c *Client, payload json.RawMessage) {
 	if p.Content == "" {
 		p.Content = " "
 	}
-	msg, err := c.hub.db.CreateMessage(msgID, p.ChannelID, c.userID, p.Content, p.Nonce, p.Type)
+	msg, err := c.hub.db.CreateMessage(msgID, p.ChannelID, c.userID, p.Content, p.Nonce, p.Type, p.ReplyToID)
 	if err != nil {
 		log.Printf("Failed to create message: %v", err)
 		return
@@ -148,6 +151,47 @@ func handleChatMessage(c *Client, payload json.RawMessage) {
 	}
 	data := mustMarshal(broadcastMsg)
 	c.hub.SendToChannel(p.ChannelID, data, "")
+}
+
+type editMessagePayload struct {
+	MessageID string `json:"message_id"`
+	Content   string `json:"content"`
+}
+
+func handleEditMessage(c *Client, payload json.RawMessage) {
+	var p editMessagePayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return
+	}
+	if p.MessageID == "" || p.Content == "" {
+		return
+	}
+
+	// Verify ownership
+	existing, err := c.hub.db.GetMessage(p.MessageID)
+	if err != nil || existing.UserID != c.userID {
+		return
+	}
+
+	updated, err := c.hub.db.UpdateMessage(p.MessageID, p.Content)
+	if err != nil {
+		log.Printf("Failed to edit message: %v", err)
+		return
+	}
+
+	// Get author info
+	author, _ := c.hub.db.GetUserByID(c.userID)
+	if author != nil {
+		author.Email = ""
+		updated.Author = author
+	}
+
+	broadcastMsg := WSMessage{
+		Type:    "message_edited",
+		Payload: json.RawMessage(mustMarshal(updated)),
+	}
+	data := mustMarshal(broadcastMsg)
+	c.hub.SendToChannel(existing.ChannelID, data, "")
 }
 
 type typingPayload struct {

@@ -100,6 +100,10 @@ export const getDMParticipants = (channelId: string) =>
 // Messages
 export const getMessages = (channelId: string, limit = 50, offset = 0) =>
   request<Message[]>('GET', `/channels/${encodeURIComponent(channelId)}/messages?limit=${limit}&offset=${offset}`)
+export const editMessage = (messageId: string, content: string) =>
+  request<Message>('PUT', `/messages/${encodeURIComponent(messageId)}`, { content })
+export const getEditHistory = (messageId: string) =>
+  request<import('../types').MessageEdit[]>('GET', `/messages/${encodeURIComponent(messageId)}/history`)
 
 // Channel keys (E2E)
 export const getChannelKeys = (channelId: string) =>

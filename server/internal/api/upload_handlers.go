@@ -56,7 +56,7 @@ func UploadHandler(cfg *config.Config, database *db.DB) http.HandlerFunc {
 		}
 
 		mimeType := header.Header.Get("Content-Type")
-		// Create attachment record (with empty message_id, will be linked later)
+		// Create attachment record (NULL message_id, will be linked later)
 		database.CreateAttachment(fileID, "", header.Filename, destPath, header.Size, mimeType)
 
 		resp := map[string]interface{}{
