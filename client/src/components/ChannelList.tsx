@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Channel } from '../types'
 import * as api from '../services/api'
+import ChannelSettings from './ChannelSettings'
 
 export interface VoicePresenceUser {
   id: string
@@ -20,34 +21,26 @@ interface Props {
 export default function ChannelList({ channels, selected, onSelect, voicePresence, isAdmin, serverId, onChannelsChanged }: Props) {
   const textChannels = channels.filter((c) => c.type === 'text')
   const voiceChannels = channels.filter((c) => c.type === 'voice')
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editName, setEditName] = useState('')
+  const [settingsChannel, setSettingsChannel] = useState<Channel | null>(null)
+  const [creatingType, setCreatingType] = useState<'text' | 'voice' | null>(null)
+  const [createName, setCreateName] = useState('')
 
-  const handleCreate = async (type: 'text' | 'voice') => {
-    if (!serverId) return
-    const name = prompt(`New ${type} channel name:`)
-    if (!name?.trim()) return
-    await api.createChannel(serverId, name.trim(), type)
+  const handleCreateStart = (type: 'text' | 'voice') => {
+    setCreatingType(type)
+    setCreateName('')
+  }
+
+  const handleCreateSubmit = async () => {
+    if (!serverId || !creatingType || !createName.trim()) return
+    await api.createChannel(serverId, createName.trim(), creatingType)
+    setCreatingType(null)
+    setCreateName('')
     onChannelsChanged?.()
   }
 
-  const handleDelete = async (ch: Channel) => {
-    if (!confirm(`Delete #${ch.name}?`)) return
-    await api.deleteChannel(ch.id)
-    onChannelsChanged?.()
-  }
-
-  const handleEditStart = (ch: Channel) => {
-    setEditingId(ch.id)
-    setEditName(ch.name)
-  }
-
-  const handleEditSave = async (ch: Channel) => {
-    const name = editName.trim()
-    if (!name || name === ch.name) { setEditingId(null); return }
-    await api.updateChannel(ch.id, name)
-    setEditingId(null)
-    onChannelsChanged?.()
+  const handleCreateCancel = () => {
+    setCreatingType(null)
+    setCreateName('')
   }
 
   const handleMove = async (ch: Channel, dir: -1 | 1) => {
@@ -67,21 +60,6 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
   }
 
   const renderChannelItem = (ch: Channel) => {
-    if (editingId === ch.id) {
-      return (
-        <div key={ch.id} className="channel-item editing">
-          <input
-            className="channel-edit-input"
-            value={editName}
-            onChange={(e) => setEditName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleEditSave(ch); if (e.key === 'Escape') setEditingId(null) }}
-            autoFocus
-          />
-          <button className="channel-action-btn" onClick={() => handleEditSave(ch)} title="Save">✓</button>
-          <button className="channel-action-btn" onClick={() => setEditingId(null)} title="Cancel">✕</button>
-        </div>
-      )
-    }
     return (
       <div key={ch.id} className="channel-item-row">
         <button
@@ -94,38 +72,54 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
           <div className="channel-actions">
             <button className="channel-action-btn" onClick={() => handleMove(ch, -1)} title="Move up">▲</button>
             <button className="channel-action-btn" onClick={() => handleMove(ch, 1)} title="Move down">▼</button>
-            <button className="channel-action-btn" onClick={() => handleEditStart(ch)} title="Edit">✏️</button>
-            <button className="channel-action-btn delete" onClick={() => handleDelete(ch)} title="Delete">🗑</button>
+            <button className="channel-action-btn" onClick={() => setSettingsChannel(ch)} title="Settings">⚙️</button>
           </div>
         )}
       </div>
     )
   }
 
+  const renderCreateInput = (type: 'text' | 'voice') => {
+    if (creatingType !== type) return null
+    return (
+      <div className="channel-create-input">
+        <input
+          type="text"
+          value={createName}
+          onChange={(e) => setCreateName(e.target.value)}
+          placeholder={`New ${type} channel name`}
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleCreateSubmit()
+            if (e.key === 'Escape') handleCreateCancel()
+          }}
+        />
+        <button className="channel-action-btn" onClick={handleCreateSubmit} title="Create">✓</button>
+        <button className="channel-action-btn" onClick={handleCreateCancel} title="Cancel">✕</button>
+      </div>
+    )
+  }
+
   return (
     <div className="channel-list">
-      {textChannels.length > 0 && (
+      {(textChannels.length > 0 || isAdmin) && (
         <>
           <div className="channel-category-row">
             <h3 className="channel-category">Text Channels</h3>
-            {isAdmin && <button className="channel-add-btn" onClick={() => handleCreate('text')} title="Create Text Channel">+</button>}
+            {isAdmin && <button className="channel-add-btn" onClick={() => handleCreateStart('text')} title="Create Text Channel">+</button>}
           </div>
+          {renderCreateInput('text')}
           {textChannels.map((ch) => renderChannelItem(ch))}
         </>
       )}
-      {textChannels.length === 0 && isAdmin && (
-        <div className="channel-category-row">
-          <h3 className="channel-category">Text Channels</h3>
-          <button className="channel-add-btn" onClick={() => handleCreate('text')} title="Create Text Channel">+</button>
-        </div>
-      )}
 
-      {voiceChannels.length > 0 && (
+      {(voiceChannels.length > 0 || isAdmin) && (
         <>
           <div className="channel-category-row">
             <h3 className="channel-category">Voice Channels</h3>
-            {isAdmin && <button className="channel-add-btn" onClick={() => handleCreate('voice')} title="Create Voice Channel">+</button>}
+            {isAdmin && <button className="channel-add-btn" onClick={() => handleCreateStart('voice')} title="Create Voice Channel">+</button>}
           </div>
+          {renderCreateInput('voice')}
           {voiceChannels.map((ch) => {
             const users = voicePresence?.get(ch.id) ?? []
             return (
@@ -146,11 +140,14 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
           })}
         </>
       )}
-      {voiceChannels.length === 0 && isAdmin && (
-        <div className="channel-category-row">
-          <h3 className="channel-category">Voice Channels</h3>
-          <button className="channel-add-btn" onClick={() => handleCreate('voice')} title="Create Voice Channel">+</button>
-        </div>
+
+      {settingsChannel && (
+        <ChannelSettings
+          channel={settingsChannel}
+          onClose={() => setSettingsChannel(null)}
+          onChannelUpdated={() => { setSettingsChannel(null); onChannelsChanged?.() }}
+          onChannelDeleted={() => { setSettingsChannel(null); onChannelsChanged?.() }}
+        />
       )}
     </div>
   )

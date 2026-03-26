@@ -1,5 +1,5 @@
 import type { WSMessage } from '../types'
-import { getToken } from './api'
+import { getToken, getServerUrl } from './api'
 
 type MessageHandler = (msg: WSMessage) => void
 
@@ -17,8 +17,17 @@ export function connect() {
     ws.close()
   }
 
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  ws = new WebSocket(`${proto}://${location.host}/api/ws?token=${encodeURIComponent(token)}`)
+  const serverUrl = getServerUrl()
+  let wsUrl: string
+  if (serverUrl) {
+    const parsed = new URL(serverUrl)
+    const proto = parsed.protocol === 'https:' ? 'wss' : 'ws'
+    wsUrl = `${proto}://${parsed.host}/api/ws?token=${encodeURIComponent(token)}`
+  } else {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+    wsUrl = `${proto}://${location.host}/api/ws?token=${encodeURIComponent(token)}`
+  }
+  ws = new WebSocket(wsUrl)
 
   ws.onopen = () => {
     console.log('WebSocket connected')

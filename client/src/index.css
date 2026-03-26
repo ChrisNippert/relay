@@ -562,6 +562,127 @@ html, body, #root {
   padding: 4px 8px;
 }
 
+/* Channel Create Input (inline) */
+.channel-create-input {
+  display: flex;
+  gap: 4px;
+  padding: 4px 8px 4px 32px;
+}
+
+.channel-create-input input {
+  flex: 1;
+  background: var(--bg-primary);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  padding: 4px 6px;
+}
+
+/* Chat Header Lock Indicator */
+.chat-header-lock {
+  margin-left: 8px;
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+/* Channel Settings Modal - Encryption */
+.ch-settings-encrypted {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  background: rgba(67, 181, 129, 0.1);
+  border: 1px solid rgba(67, 181, 129, 0.3);
+  border-radius: 8px;
+}
+
+.ch-settings-lock {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.ch-settings-enc-status {
+  font-weight: 600;
+  color: var(--success);
+  font-size: 0.95rem;
+  margin-bottom: 2px;
+}
+
+.ch-settings-enc-note {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.ch-settings-encrypt-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ch-settings-enc-desc {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.ch-settings-enc-warn {
+  font-size: 0.85rem;
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.ch-settings-encrypt-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ch-settings-confirm-code {
+  font-family: monospace;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  text-align: center;
+  padding: 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--danger);
+  user-select: none;
+}
+
+.ch-settings-confirm-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-family: monospace;
+  letter-spacing: 0.15em;
+  text-align: center;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.ch-settings-confirm-input:focus {
+  border-color: var(--accent);
+}
+
+.ch-settings-confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.ch-settings-delete-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 /* User Popover */
 .user-popover {
   position: fixed;
@@ -1764,6 +1885,16 @@ html, body, #root {
 }
 
 .chat-call-btn:hover {
+  background: var(--success);
+}
+
+.chat-call-btn.e2e-active {
+  background: var(--success);
+  color: #fff;
+  cursor: default;
+}
+
+.chat-call-btn.e2e-active:hover {
   background: var(--success);
 }
 

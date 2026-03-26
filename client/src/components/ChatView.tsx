@@ -5,6 +5,7 @@ import hljs from 'highlight.js'
 import { sendChatMessage, sendTypingStart, sendTypingStop, sendEditMessage, sendDeleteMessage, subscribe } from '../services/ws'
 import { useAuth } from '../context/AuthContext'
 import UserPopover from './UserPopover'
+import * as e2e from '../services/e2e'
 
 interface Props {
   channel: Channel
@@ -194,8 +195,10 @@ export default function ChatView({ channel, onStartCall, onDMUser }: Props) {
   const [mentionUsers, setMentionUsers] = useState<User[]>([])
   const [members, setMembers] = useState<User[]>([])
   const [popover, setPopover] = useState<{ userId: string; rect: DOMRect } | null>(null)
+  const [encrypted, setEncrypted] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const isAtBottomRef = useRef(true)
   const typingTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -213,6 +216,16 @@ export default function ChatView({ channel, onStartCall, onDMUser }: Props) {
       setDmPartnerId(null)
     }
   }, [channel.id, channel.server_id, user?.id, onStartCall])
+
+  // Check if channel has E2E encryption enabled
+  useEffect(() => {
+    setEncrypted(false)
+    e2e.isChannelEncrypted(channel.id).then((enc) => {
+      setEncrypted(enc)
+      // If encrypted, redistribute keys to any members missing them
+      if (enc) e2e.redistributeKeys(channel.id, channel.server_id || undefined)
+    }).catch(() => setEncrypted(false))
+  }, [channel.id, channel.server_id])
 
   // Load channel members for @mention autocomplete
   useEffect(() => {
@@ -256,8 +269,19 @@ export default function ChatView({ channel, onStartCall, onDMUser }: Props) {
     setReplyingTo(null)
     setEditingMsg(null)
     initialLoadRef.current = true
-    api.getMessages(channel.id).then((msgs) => {
-      setMessages(msgs.reverse()) // API returns DESC, we want ASC
+    api.getMessages(channel.id).then(async (msgs) => {
+      const ordered = msgs.reverse()
+      // Decrypt any E2E-encrypted messages
+      const decrypted = await Promise.all(
+        ordered.map(async (m) => {
+          if (e2e.isEncryptedContent(m.content)) {
+            const plain = await e2e.decryptMessage(channel.id, m.content)
+            return { ...m, content: plain }
+          }
+          return m
+        })
+      )
+      setMessages(decrypted)
     }).catch(console.error)
   }, [channel.id])
 
@@ -267,7 +291,16 @@ export default function ChatView({ channel, onStartCall, onDMUser }: Props) {
       if (msg.type === 'chat_message') {
         const m = msg.payload as Message
         if (m.channel_id === channel.id) {
-          setMessages((prev) => prev.some((x) => x.id === m.id) ? prev : [...prev, m])
+          // Decrypt if encrypted, then add to state
+          const handleMsg = async () => {
+            let decrypted = m
+            if (e2e.isEncryptedContent(m.content)) {
+              const plain = await e2e.decryptMessage(channel.id, m.content)
+              decrypted = { ...m, content: plain }
+            }
+            setMessages((prev) => prev.some((x) => x.id === decrypted.id) ? prev : [...prev, decrypted])
+          }
+          handleMsg()
           // Remove sender from typing
           setTypingUsers((prev) => {
             const next = new Map(prev)
@@ -310,29 +343,41 @@ export default function ChatView({ channel, onStartCall, onDMUser }: Props) {
   useEffect(() => {
     if (initialLoadRef.current && messages.length > 0) {
       initialLoadRef.current = false
-      bottomRef.current?.scrollIntoView()
-    } else {
-      // Only auto-scroll if user is near bottom
-      const list = listRef.current
-      if (list) {
-        const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 150
-        if (atBottom) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-      }
+      requestAnimationFrame(() => {
+        bottomRef.current?.scrollIntoView()
+      })
+    } else if (isAtBottomRef.current) {
+      requestAnimationFrame(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+      })
     }
   }, [messages])
 
   // Infinite scroll: load older messages when scrolling to top
   const handleScroll = useCallback(() => {
     const list = listRef.current
-    if (!list || loadingOlder || !hasMore) return
+    if (!list) return
+    // Track whether user is at the bottom
+    isAtBottomRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 200
+    if (loadingOlder || !hasMore) return
     if (list.scrollTop < 100) {
       setLoadingOlder(true)
       const prevHeight = list.scrollHeight
       api.getMessages(channel.id, 50, messages.length)
-        .then((older) => {
+        .then(async (older) => {
           if (older.length < 50) setHasMore(false)
           if (older.length > 0) {
-            setMessages((prev) => [...older.reverse(), ...prev])
+            const ordered = older.reverse()
+            const decrypted = await Promise.all(
+              ordered.map(async (m) => {
+                if (e2e.isEncryptedContent(m.content)) {
+                  const plain = await e2e.decryptMessage(channel.id, m.content)
+                  return { ...m, content: plain }
+                }
+                return m
+              })
+            )
+            setMessages((prev) => [...decrypted, ...prev])
             // Preserve scroll position after prepending
             requestAnimationFrame(() => {
               list.scrollTop = list.scrollHeight - prevHeight
@@ -404,7 +449,14 @@ export default function ChatView({ channel, onStartCall, onDMUser }: Props) {
     // Don't send if there's no text and no successful uploads
     if (!text && attachmentIds.length === 0) return
 
-    sendChatMessage(channel.id, text || ' ', undefined, attachmentIds.length ? attachmentIds : undefined, replyingTo?.id)
+    // Encrypt if E2E is enabled for this channel
+    let content = text || ' '
+    if (encrypted) {
+      const enc = await e2e.encryptMessage(channel.id, content)
+      if (enc) content = enc
+    }
+
+    sendChatMessage(channel.id, content, undefined, attachmentIds.length ? attachmentIds : undefined, replyingTo?.id)
     setReplyingTo(null)
     setInput('')
     sendTypingStop(channel.id)
@@ -540,6 +592,7 @@ export default function ChatView({ channel, onStartCall, onDMUser }: Props) {
       <div className="chat-header">
         <span className="chat-header-name">
           {channel.server_id ? '#' : '💬'} {channel.name}
+          {encrypted && <span className="chat-header-lock" title="End-to-end encrypted">🔒</span>}
         </span>
         {dmPartnerId && onStartCall && (
           <div className="chat-header-actions">

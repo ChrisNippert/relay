@@ -2,6 +2,31 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import type { User } from '../types'
 import * as api from '../services/api'
 import { connect, disconnect } from '../services/ws'
+import { generateKeyPair } from '../services/crypto'
+
+const PRIVKEY_STORAGE = 'relay_e2e_privkey'
+
+async function ensureKeyPair() {
+  const existing = localStorage.getItem(PRIVKEY_STORAGE)
+  if (existing) {
+    // Already have a keypair; check if server has our public key
+    const me = await api.getMe()
+    if (!me.public_key) {
+      const kp = await generateKeyPair()
+      localStorage.setItem(PRIVKEY_STORAGE, kp.privateKey)
+      await api.updatePublicKey(kp.publicKey)
+    }
+    return
+  }
+  // Generate fresh keypair
+  const kp = await generateKeyPair()
+  localStorage.setItem(PRIVKEY_STORAGE, kp.privateKey)
+  await api.updatePublicKey(kp.publicKey)
+}
+
+export function getPrivateKey(): string | null {
+  return localStorage.getItem(PRIVKEY_STORAGE)
+}
 
 interface AuthCtx {
   user: User | null
@@ -21,9 +46,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const token = api.getToken()
     if (token) {
       api.getMe()
-        .then((u) => {
+        .then(async (u) => {
           setUser(u)
           connect()
+          await ensureKeyPair().catch(console.error)
         })
         .catch(() => {
           api.setToken(null)
@@ -40,6 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api.setToken(res.token)
     setUser(res.user)
     connect()
+    await ensureKeyPair().catch(console.error)
   }
 
   const register = async (username: string, email: string, password: string, displayName: string) => {
@@ -47,6 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     api.setToken(res.token)
     setUser(res.user)
     connect()
+    await ensureKeyPair().catch(console.error)
   }
 
   const logout = () => {

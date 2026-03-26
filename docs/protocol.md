@@ -1,197 +1,235 @@
-# Relay Chat Protocol
+# Relay Protocol
 
-This document describes the Relay API for building alternative clients (CLI, TUI, bots, etc.).
-
-## Base URL
-
-All HTTP endpoints are under `/api/`. WebSocket connects at `/ws`.
-
-Default server address: `http://localhost:8080`
+Relay is a chat application with a REST API for data operations and a WebSocket for real-time messaging. This document covers the full protocol.
 
 ---
 
-## Authentication
+## Overview
+
+```
+┌─────────┐         HTTPS          ┌──────────┐        SQLite
+│  Client  │ ◄────────────────────► │  Server  │ ◄────► relay.db
+│ (React,  │                        │  (Go)    │
+│  CLI…)   │ ◄── WSS (JSON) ──────►│          │──────► uploads/
+└─────────┘    real-time msgs       └──────────┘
+```
+
+**Two transports:**
+- **REST** (`/api/*`) — login, fetch history, manage servers/channels/friends, upload files
+- **WebSocket** (`/api/ws`) — send messages, typing indicators, presence, voice signaling
+
+All data is JSON. All IDs are UUIDs.
+
+---
+
+## 1. Authentication
 
 ### Register
 
-```
+```http
 POST /api/auth/register
 Content-Type: application/json
 
-{
-  "username": "alice",
-  "email": "alice@example.com",
-  "password": "secret123",
-  "display_name": "Alice"
-}
-```
-
-Response:
-```json
-{
-  "token": "eyJhbG...",
-  "user": { "id": "...", "username": "alice", "display_name": "Alice", ... }
-}
+{"username": "alice", "email": "alice@example.com", "password": "secret", "display_name": "Alice"}
 ```
 
 ### Login
 
-```
+```http
 POST /api/auth/login
 Content-Type: application/json
 
-{
-  "email": "alice@example.com",
-  "password": "secret123"
-}
+{"email": "alice@example.com", "password": "secret"}
 ```
 
-Response: Same as register.
-
-### Using the Token
-
-For **REST requests**, include the header:
-```
-Authorization: Bearer <token>
+Both return:
+```json
+{"token": "eyJhbG...", "user": {"id": "uuid", "username": "alice", ...}}
 ```
 
-For **WebSocket**, pass it as a query parameter:
-```
-ws://localhost:8080/ws?token=<token>
-```
+### Using the token
 
-Tokens are JWTs valid for 7 days.
+- **REST**: `Authorization: Bearer <token>` header
+- **WebSocket**: query param `?token=<token>`
+
+Tokens are JWTs, valid 7 days.
 
 ---
 
-## REST API
+## 2. Data Model
 
-All authenticated endpoints require the `Authorization: Bearer <token>` header.
+```
+User
+ ├── owns Servers
+ ├── has Friendships (pending/accepted)
+ └── has DM channels
+
+Server
+ ├── has Members (role: admin | member)
+ ├── has Channels (type: text | voice)
+ ├── has Invites (code, max_uses, expires_at)
+ └── owner = admin who created it
+
+Channel
+ ├── belongs to a Server  (server channels)
+ │   OR has no server_id  (DM channels)
+ ├── has Messages
+ └── has ChannelKeys (E2E encryption)
+
+Message
+ ├── belongs to Channel + User
+ ├── has Attachments (uploaded files)
+ ├── can reply to another Message (reply_to_id)
+ ├── can be edited (tracked in edit history)
+ └── can be soft-deleted
+```
+
+---
+
+## 3. REST API
+
+All endpoints require `Authorization: Bearer <token>` unless noted.
 
 ### Users
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/users/me` | Get your own profile |
-| PUT | `/api/users/me` | Update display_name, avatar_url |
-| GET | `/api/users/{id}` | Get a user's public profile |
-| GET | `/api/users/search?q=term` | Search users by username/display name |
-| PUT | `/api/users/me/public-key` | Upload your E2E public key |
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| GET | `/api/users/me` | — | Your profile |
+| PUT | `/api/users/me` | `{display_name?, avatar_url?}` | Update profile |
+| GET | `/api/users/{id}` | — | Get user by ID |
+| GET | `/api/users/search?q=term` | — | Search by username/display name |
+| PUT | `/api/users/me/public-key` | `{public_key}` | Set E2E public key |
 
 ### Friends
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/friends` | List your friendships (pending + accepted) |
-| POST | `/api/friends/request` | Send friend request. Body: `{"friend_id": "..."}` |
-| POST | `/api/friends/accept/{friendshipID}` | Accept a pending request |
-| DELETE | `/api/friends/{friendshipID}` | Remove a friendship |
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| GET | `/api/friends` | — | List friendships (pending + accepted) |
+| POST | `/api/friends/request` | `{user_id}` | Send friend request |
+| POST | `/api/friends/accept/{id}` | — | Accept request |
+| DELETE | `/api/friends/{id}` | — | Remove friendship |
 
 ### Servers
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/servers` | Create a server. Body: `{"name": "..."}` |
-| GET | `/api/servers` | List your servers |
-| GET | `/api/servers/{id}` | Get server details |
-| PUT | `/api/servers/{id}` | Update server (admin only). Body: `{"name": "..."}` |
-| DELETE | `/api/servers/{id}` | Delete server (owner only) |
-| POST | `/api/servers/{id}/join` | Join a server |
-| POST | `/api/servers/{id}/leave` | Leave a server |
-| GET | `/api/servers/{id}/members` | List server members |
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| POST | `/api/servers` | `{name}` | Create server (auto-creates `general` text + `General` voice channels) |
+| GET | `/api/servers` | — | List your servers |
+| GET | `/api/servers/{id}` | — | Get server details |
+| PUT | `/api/servers/{id}` | `{name?, icon_url?}` | Update (admin only) |
+| DELETE | `/api/servers/{id}` | — | Delete (owner only) |
+| POST | `/api/servers/{id}/join` | — | Join server |
+| POST | `/api/servers/{id}/leave` | — | Leave server |
+| GET | `/api/servers/{id}/members` | — | List members |
+| PUT | `/api/servers/{sid}/members/{uid}/role` | `{role}` | Change member role (admin only) |
 
-When you create a server, it automatically creates a `general` text channel and a `General` voice channel, and makes you an admin.
+### Invites
+
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| POST | `/api/servers/{id}/invites` | `{max_uses?, expires_in?}` | Create invite |
+| GET | `/api/servers/{id}/invites` | — | List server invites |
+| POST | `/api/invites/{code}/join` | — | Join via invite code |
+| DELETE | `/api/invites/{id}` | — | Delete invite |
 
 ### Channels
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/servers/{serverID}/channels` | List channels in a server |
-| POST | `/api/servers/{serverID}/channels` | Create channel (admin only). Body: `{"name": "...", "type": "text"|"voice"}` |
-| DELETE | `/api/channels/{channelID}` | Delete a channel (admin only) |
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| GET | `/api/servers/{id}/channels` | — | List channels |
+| POST | `/api/servers/{id}/channels` | `{name, type}` | Create channel (admin only). Type: `text` or `voice` |
+| PUT | `/api/channels/{id}` | `{name}` | Rename channel |
+| DELETE | `/api/channels/{id}` | — | Delete channel (admin only) |
+| PUT | `/api/servers/{id}/channels/positions` | `{positions: {channelId: number}}` | Reorder channels |
 
 ### Direct Messages
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/dm` | Create/get a DM channel. Body: `{"user_id": "..."}` |
-| GET | `/api/dm` | List your DM channels |
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| POST | `/api/dm` | `{user_id}` | Create/get DM channel with a user |
+| GET | `/api/dm` | — | List your DM channels |
+| GET | `/api/dm/{id}/participants` | — | Get DM participant user IDs |
 
-DM channels are just channels with no server_id. Creating a DM with the same user twice returns the existing channel.
+DMs are just channels with no `server_id`. Creating a DM with the same user twice returns the existing channel.
 
 ### Messages
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/channels/{channelID}/messages?limit=50&offset=0` | Get messages (newest first) |
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| GET | `/api/channels/{id}/messages?limit=50&offset=0` | — | Fetch history (newest first, max 100) |
+| PUT | `/api/messages/{id}` | `{content}` | Edit message (owner only) |
+| DELETE | `/api/messages/{id}` | — | Soft-delete message (owner only) |
+| GET | `/api/messages/{id}/history` | — | Get edit history |
 
-Messages are fetched via REST but **sent via WebSocket** (see below). Max limit: 100, default: 50.
+**Messages are sent via WebSocket**, not REST (see section 4).
 
-Message objects:
-```json
-{
-  "id": "uuid",
-  "channel_id": "uuid",
-  "user_id": "uuid",
-  "content": "Hello!",
-  "nonce": "optional-client-nonce",
-  "type": "text",
-  "created_at": "2024-01-01T00:00:00Z",
-  "author": { "id": "...", "username": "alice", "display_name": "Alice", ... },
-  "attachments": []
-}
-```
+### Files
+
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| POST | `/api/upload` | multipart `file` field | Upload file (max 50 MB) |
+| GET | `/api/files/{id}` | — | Download file |
+
+Allowed types: jpg, jpeg, png, gif, webp, mp4, webm, mp3, ogg, wav, pdf, txt, zip.
 
 ### E2E Encryption Keys
 
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| GET | `/api/channels/{id}/keys` | — | Get encrypted channel keys |
+| POST | `/api/channels/{id}/keys` | `{encrypted_key}` | Set your encrypted key for a channel |
+
+### Voice
+
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/channels/{channelID}/keys` | Get all encrypted channel keys |
-| POST | `/api/channels/{channelID}/keys` | Set your encrypted key. Body: `{"encrypted_key": "..."}` |
+| GET | `/api/channels/{id}/voice-users` | List users in a voice channel |
 
-### File Upload
+### Other
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/upload` | Upload a file (multipart/form-data, field: `file`). Max 50MB. |
-| GET | `/api/files/{fileID}` | Download a file |
-
-Allowed extensions: jpg, jpeg, png, gif, webp, mp4, webm, mp3, ogg, wav, pdf, txt, zip.
+| GET | `/health` | Health check (no auth required) |
+| GET | `/api/og?url=...` | Fetch OpenGraph metadata for a URL |
 
 ---
 
-## WebSocket Protocol
+## 4. WebSocket Protocol
 
-Connect to `ws://host:port/ws?token=<jwt>`.
+### Connection
 
-All messages are JSON with the envelope format:
-```json
-{
-  "type": "message_type",
-  "payload": { ... }
-}
+```
+wss://host:port/api/ws?token=<jwt>
 ```
 
-### Sending Messages
+All messages use a JSON envelope:
 
-#### Chat Message (client → server)
+```json
+{"type": "message_type", "payload": {...}}
+```
 
+### Message Types
+
+#### Chat Messages
+
+**Send** (client → server):
 ```json
 {
   "type": "chat_message",
   "payload": {
     "channel_id": "uuid",
-    "content": "Hello world",
-    "nonce": "optional-client-nonce",
-    "type": "text"
+    "content": "Hello!",
+    "nonce": "client-generated-id",
+    "type": "text",
+    "attachment_ids": ["uuid", "uuid"],
+    "reply_to_id": "uuid"
   }
 }
 ```
 
-The server stores the message and broadcasts it to all channel participants.
+Only `channel_id` is required. `content` or `attachment_ids` must be non-empty. `nonce` is optional (for deduplication). `reply_to_id` is optional.
 
-#### Chat Message (server → client)
-
+**Receive** (server → all channel members, including sender):
 ```json
 {
   "type": "chat_message",
@@ -199,151 +237,166 @@ The server stores the message and broadcasts it to all channel participants.
     "id": "uuid",
     "channel_id": "uuid",
     "user_id": "uuid",
-    "content": "Hello world",
-    "nonce": "optional",
+    "content": "Hello!",
+    "nonce": "client-generated-id",
     "type": "text",
-    "created_at": "2024-01-01T00:00:00Z",
-    "updated_at": "2024-01-01T00:00:00Z",
-    "author": {
-      "id": "uuid",
-      "username": "alice",
-      "display_name": "Alice",
-      "status": "online"
-    }
+    "created_at": "2026-01-01T00:00:00Z",
+    "updated_at": "2026-01-01T00:00:00Z",
+    "author": {"id": "uuid", "username": "alice", "display_name": "Alice", "status": "online"},
+    "attachments": []
   }
 }
 ```
 
-The sender also receives their own message back (for confirmation + getting the server-assigned ID).
+The sender gets their own message back (for confirmation + server-assigned ID).
 
-### Typing Indicators
+#### Edit Message
 
+**Send** (client → server):
 ```json
-{"type": "typing_start", "payload": {"channel_id": "uuid"}}
-{"type": "typing_stop",  "payload": {"channel_id": "uuid"}}
+{"type": "edit_message", "payload": {"message_id": "uuid", "content": "updated text"}}
 ```
 
-Server relays to other channel participants (excluding sender):
+**Receive** (server → channel members):
+```json
+{"type": "message_edited", "payload": {"id": "uuid", "content": "updated text", "edited": true, ...}}
+```
+
+Only the message author can edit.
+
+#### Delete Message
+
+**Send** (client → server):
+```json
+{"type": "delete_message", "payload": {"message_id": "uuid"}}
+```
+
+**Receive** (server → channel members):
+```json
+{"type": "message_deleted", "payload": {"id": "uuid", "deleted": true, ...}}
+```
+
+Only the message author can delete. Deletion is soft (content cleared, `deleted` flag set).
+
+#### Typing Indicators
+
+**Send**: `{"type": "typing_start", "payload": {"channel_id": "uuid"}}`  
+**Send**: `{"type": "typing_stop", "payload": {"channel_id": "uuid"}}`
+
+**Receive** (other channel members, not sender):
 ```json
 {"type": "typing_start", "payload": {"channel_id": "uuid", "user_id": "uuid"}}
 ```
 
-### Presence
+#### Presence
 
-When a user connects, the server broadcasts:
+Automatic — no client action needed.
+
+**Receive** (broadcast to all connected users):
 ```json
 {"type": "presence", "payload": {"user_id": "uuid", "status": "online"}}
-```
-
-When they disconnect:
-```json
 {"type": "presence", "payload": {"user_id": "uuid", "status": "offline"}}
 ```
 
-### Voice/Video Call Signaling
+Sent when a user's first connection opens or last connection closes.
 
-Calls use WebRTC with the server acting as a signaling relay. Media flows peer-to-peer.
+#### Voice Channels
 
-#### Call Offer (client → server → target)
+**Join**: `{"type": "voice_join", "payload": {"channel_id": "uuid"}}`  
+**Leave**: `{"type": "voice_leave", "payload": {"channel_id": "uuid"}}`
 
+**Receive** (channel members):
 ```json
-{
-  "type": "call_offer",
-  "payload": {
-    "target_user_id": "uuid",
-    "channel_id": "uuid",
-    "signal": { "type": "offer", "sdp": "..." }
-  }
-}
+{"type": "voice_state", "payload": {"channel_id": "uuid", "user_ids": ["uuid", "uuid"]}}
 ```
 
-Server relays to target as:
+On disconnect, the server auto-removes the user from all voice channels and broadcasts updated state.
+
+#### WebRTC Call Signaling
+
+The server relays WebRTC signals between peers. Media flows peer-to-peer, not through the server.
+
+**Send** (client → server, forwarded to target):
 ```json
-{
-  "type": "call_offer",
-  "payload": {
-    "from_user_id": "uuid",
-    "channel_id": "uuid",
-    "signal": { "type": "offer", "sdp": "..." }
-  }
-}
+{"type": "call_offer",     "payload": {"target_user_id": "uuid", "channel_id": "uuid", "signal": {SDP}}}
+{"type": "call_answer",    "payload": {"target_user_id": "uuid", "channel_id": "uuid", "signal": {SDP}}}
+{"type": "ice_candidate",  "payload": {"target_user_id": "uuid", "channel_id": "uuid", "signal": {ICE}}}
+{"type": "call_end",       "payload": {"target_user_id": "uuid", "channel_id": "uuid"}}
 ```
 
-#### Call Answer
-
-Same pattern as offer but with `"type": "call_answer"`.
-
-#### ICE Candidate
-
+**Receive** (target user):
 ```json
-{
-  "type": "ice_candidate",
-  "payload": {
-    "target_user_id": "uuid",
-    "channel_id": "uuid",
-    "signal": { "candidate": "...", "sdpMLineIndex": 0, ... }
-  }
-}
+{"type": "call_offer",     "payload": {"from_user_id": "uuid", "channel_id": "uuid", "signal": {SDP}}}
+{"type": "call_answer",    "payload": {"from_user_id": "uuid", "channel_id": "uuid", "signal": {SDP}}}
+{"type": "ice_candidate",  "payload": {"from_user_id": "uuid", "channel_id": "uuid", "signal": {ICE}}}
+{"type": "call_end",       "payload": {"from_user_id": "uuid", "channel_id": "uuid"}}
 ```
 
-#### End Call
-
-```json
-{
-  "type": "call_end",
-  "payload": {
-    "target_user_id": "uuid",
-    "channel_id": "uuid"
-  }
-}
-```
+Note: `target_user_id` (outgoing) becomes `from_user_id` (incoming).
 
 ---
 
-## Minimal CLI Client Flow
+## 5. Connection Details
 
-Here's the sequence for a bare-bones text chat CLI client:
+| Setting | Value |
+|---------|-------|
+| Ping interval | 54 seconds |
+| Pong timeout | 60 seconds |
+| Max message size | 64 KB |
+| Send buffer | 256 messages |
+| Multi-device | Yes — multiple WS connections per user |
+| Reconnection | Client should reconnect after ~3 seconds on disconnect |
 
-1. **Login**: `POST /api/auth/login` → save token
-2. **List servers**: `GET /api/servers`
-3. **List channels**: `GET /api/servers/{id}/channels`
-4. **Connect WebSocket**: `ws://host:port/ws?token=<token>`
-5. **Load history**: `GET /api/channels/{id}/messages`
-6. **Send messages**: Write `{"type":"chat_message","payload":{"channel_id":"...","content":"..."}}` to the WebSocket
-7. **Receive messages**: Read `{"type":"chat_message","payload":{...}}` from the WebSocket
+---
 
-That's it for basic text chat. No WebRTC, no encryption needed for a minimal client.
+## 6. Quick Start (Minimal Client)
 
-### Example with curl + websocat
+A bare-bones text client needs only 4 steps:
+
+```
+1. POST /api/auth/login          → get token
+2. GET  /api/servers             → pick a server
+   GET  /api/servers/{id}/channels → pick a channel
+3. Connect WSS with token
+4. Send/receive {"type": "chat_message", ...} on the WebSocket
+```
+
+**Example with curl + websocat:**
 
 ```bash
 # Login
-TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+TOKEN=$(curl -sk -X POST https://localhost:8080/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"alice@example.com","password":"secret123"}' | jq -r .token)
+  -d '{"email":"alice@example.com","password":"secret"}' | jq -r .token)
 
-# List servers
-curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/servers | jq
+# Find a channel
+SERVER=$(curl -sk -H "Authorization: Bearer $TOKEN" https://localhost:8080/api/servers | jq -r '.[0].id')
+CHANNEL=$(curl -sk -H "Authorization: Bearer $TOKEN" "https://localhost:8080/api/servers/$SERVER/channels" | jq -r '.[0].id')
 
-# List channels in first server
-SERVER_ID=$(curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/servers | jq -r '.[0].id')
-curl -s -H "Authorization: Bearer $TOKEN" "http://localhost:8080/api/servers/$SERVER_ID/channels" | jq
-
-# Get channel ID
-CHANNEL_ID=$(curl -s -H "Authorization: Bearer $TOKEN" \
-  "http://localhost:8080/api/servers/$SERVER_ID/channels" | jq -r '.[0].id')
-
-# Connect and chat via websocat
-echo '{"type":"chat_message","payload":{"channel_id":"'$CHANNEL_ID'","content":"Hello from CLI!"}}' | \
-  websocat "ws://localhost:8080/ws?token=$TOKEN"
+# Chat
+echo '{"type":"chat_message","payload":{"channel_id":"'$CHANNEL'","content":"Hello!"}}' | \
+  websocat -k "wss://localhost:8080/api/ws?token=$TOKEN"
 ```
 
 ---
 
-## Connection Notes
+## 7. All WebSocket Message Types (Summary)
 
-- **Keepalive**: The server sends WebSocket ping frames every 54 seconds. Clients must respond with pong (most libraries handle this automatically). If no pong is received within 60 seconds, the connection is closed.
-- **Message size limit**: 64 KB per WebSocket message.
-- **Send buffer**: 256 messages. If the buffer is full, the connection is closed.
-- **Single session**: Only one WebSocket connection per user. New connections close the old one.
-- **Reconnection**: Clients should reconnect on disconnect with a short delay (e.g., 3 seconds).
+| Type | Direction | Purpose |
+|------|-----------|---------|
+| `chat_message` | client → server | Send a message |
+| `chat_message` | server → client | New message received |
+| `edit_message` | client → server | Edit own message |
+| `message_edited` | server → client | Message was edited |
+| `delete_message` | client → server | Delete own message |
+| `message_deleted` | server → client | Message was deleted |
+| `typing_start` | both | User started typing |
+| `typing_stop` | both | User stopped typing |
+| `presence` | server → client | User online/offline |
+| `voice_join` | client → server | Join voice channel |
+| `voice_leave` | client → server | Leave voice channel |
+| `voice_state` | server → client | Updated list of voice users |
+| `call_offer` | both | WebRTC offer (SDP) |
+| `call_answer` | both | WebRTC answer (SDP) |
+| `ice_candidate` | both | WebRTC ICE candidate |
+| `call_end` | both | End a call |

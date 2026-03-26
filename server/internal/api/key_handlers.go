@@ -36,14 +36,15 @@ func GetChannelKeysHandler(database *db.DB) http.HandlerFunc {
 
 type setKeyRequest struct {
 	EncryptedKey string `json:"encrypted_key"`
+	UserID       string `json:"user_id,omitempty"` // optional: set key for another member
 }
 
 func SetChannelKeyHandler(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		channelID := chi.URLParam(r, "channelID")
-		userID := GetUserID(r)
+		callerID := GetUserID(r)
 
-		hasAccess, err := database.IsChannelParticipant(channelID, userID)
+		hasAccess, err := database.IsChannelParticipant(channelID, callerID)
 		if err != nil || !hasAccess {
 			http.Error(w, `{"error":"access denied"}`, http.StatusForbidden)
 			return
@@ -55,7 +56,18 @@ func SetChannelKeyHandler(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		if err := database.SetChannelKey(channelID, userID, req.EncryptedKey); err != nil {
+		targetUserID := callerID
+		if req.UserID != "" {
+			// Verify the target user is also a channel participant
+			targetAccess, err := database.IsChannelParticipant(channelID, req.UserID)
+			if err != nil || !targetAccess {
+				http.Error(w, `{"error":"target user is not a channel participant"}`, http.StatusBadRequest)
+				return
+			}
+			targetUserID = req.UserID
+		}
+
+		if err := database.SetChannelKey(channelID, targetUserID, req.EncryptedKey); err != nil {
 			http.Error(w, `{"error":"failed to set key"}`, http.StatusInternalServerError)
 			return
 		}

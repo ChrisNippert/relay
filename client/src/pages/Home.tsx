@@ -146,7 +146,14 @@ export default function Home() {
   // Load channels when server changes
   useEffect(() => {
     if (selectedServer) {
-      api.getChannels(selectedServer.id).then(setChannels).catch(console.error)
+      api.getChannels(selectedServer.id).then((chs) => {
+        setChannels(chs)
+        // Auto-select the first text channel if none selected
+        if (!selectedChannel || selectedChannel.server_id !== selectedServer.id) {
+          const firstText = chs.find((c) => c.type === 'text')
+          if (firstText) setSelectedChannel(firstText)
+        }
+      }).catch(console.error)
       // Determine admin status
       api.getMembers(selectedServer.id).then((members) => {
         const me = members.find((m) => m.user_id === user?.id)
@@ -193,7 +200,6 @@ export default function Home() {
 
   const handleSelectServer = (server: Server) => {
     setSelectedServer(server)
-    setSelectedChannel(null)
     setView('server')
   }
 

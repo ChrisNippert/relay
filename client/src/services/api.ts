@@ -1,6 +1,28 @@
 import type { AuthResponse, Channel, ChannelKey, Friendship, Message, Server, ServerInvite, ServerMember, User } from '../types'
 
-const BASE = '/api'
+let serverUrl: string = localStorage.getItem('relay_server_url') || ''
+
+function getBase(): string {
+  return serverUrl ? `${serverUrl}/api` : '/api'
+}
+
+export function setServerUrl(url: string) {
+  // Normalize: strip trailing slash, ensure https:// if no protocol
+  let normalized = url.trim().replace(/\/+$/, '')
+  if (normalized && !/^https?:\/\//i.test(normalized)) {
+    normalized = `https://${normalized}`
+  }
+  serverUrl = normalized
+  if (normalized) {
+    localStorage.setItem('relay_server_url', normalized)
+  } else {
+    localStorage.removeItem('relay_server_url')
+  }
+}
+
+export function getServerUrl(): string {
+  return serverUrl
+}
 
 let token: string | null = localStorage.getItem('relay_token')
 
@@ -22,7 +44,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (token) headers['Authorization'] = `Bearer ${token}`
   if (body) headers['Content-Type'] = 'application/json'
 
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${getBase()}${path}`, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
@@ -116,8 +138,8 @@ export const getEditHistory = (messageId: string) =>
 // Channel keys (E2E)
 export const getChannelKeys = (channelId: string) =>
   request<ChannelKey[]>('GET', `/channels/${encodeURIComponent(channelId)}/keys`)
-export const setChannelKey = (channelId: string, encrypted_key: string) =>
-  request<void>('POST', `/channels/${encodeURIComponent(channelId)}/keys`, { encrypted_key })
+export const setChannelKey = (channelId: string, encrypted_key: string, user_id?: string) =>
+  request<void>('POST', `/channels/${encodeURIComponent(channelId)}/keys`, { encrypted_key, ...(user_id ? { user_id } : {}) })
 
 // File upload
 const MAX_UPLOAD_MB = 50
@@ -164,13 +186,13 @@ export function uploadFile(
       reject(new Error('Upload cancelled'))
     })
 
-    xhr.open('POST', `${BASE}/upload`)
+    xhr.open('POST', `${getBase()}/upload`)
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
     xhr.send(form)
   })
 }
 
-export const fileURL = (fileId: string) => `${BASE}/files/${encodeURIComponent(fileId)}`
+export const fileURL = (fileId: string) => `${getBase()}/files/${encodeURIComponent(fileId)}`
 
 // Voice state
 export const getVoiceUsers = (channelId: string) =>
