@@ -61,7 +61,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
   const analyserRef = useRef<AnalyserNode | null>(null)
   const speakingAnimRef = useRef<number>(0)
 
-  // Load server members for display names
+  // Load server members for display names, or DM participants
   useEffect(() => {
     if (channel.server_id) {
       api.getMembers(channel.server_id).then(async (serverMembers) => {
@@ -74,8 +74,20 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         }
         setMembers(names)
       }).catch(console.error)
+    } else {
+      // DM channel — resolve participants
+      api.getDMParticipants(channel.id).then(async (ids: string[]) => {
+        const names = new Map<string, string>()
+        for (const id of ids) {
+          try {
+            const u = await api.getUser(id)
+            names.set(id, u.display_name)
+          } catch { /* skip */ }
+        }
+        setMembers(names)
+      }).catch(console.error)
     }
-  }, [channel.server_id])
+  }, [channel.server_id, channel.id])
 
   // Fetch initial voice state
   useEffect(() => {

@@ -15,12 +15,14 @@ const COLOR_PRESETS = [
 ]
 
 export default function SettingsPanel({ onClose }: Props) {
-  const { user } = useAuth()
+  const { user, updateUser } = useAuth()
   const [settings, setSettings] = useState<MediaSettings>(getSettings)
   const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([])
   const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([])
   const [videoInputs, setVideoInputs] = useState<MediaDeviceInfo[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [devicesLoaded, setDevicesLoaded] = useState(false)
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
 
   // Profile fields
   const [displayName, setDisplayName] = useState(user?.display_name ?? '')
@@ -30,14 +32,37 @@ export default function SettingsPanel({ onClose }: Props) {
   const [profileSaved, setProfileSaved] = useState(false)
   const [tab, setTab] = useState<'profile' | 'media'>('profile')
 
+  // Only load devices when media tab is opened
   useEffect(() => {
+    if (tab !== 'media' || devicesLoaded) return
+    setLoading(true)
     getDevices().then((d) => {
       setAudioInputs(d.audioInputs)
       setAudioOutputs(d.audioOutputs)
       setVideoInputs(d.videoInputs)
+      setDevicesLoaded(true)
       setLoading(false)
     }).catch(() => setLoading(false))
-  }, [])
+  }, [tab, devicesLoaded])
+
+  // Stop camera stream on unmount or tab change
+  useEffect(() => {
+    return () => { cameraStream?.getTracks().forEach((t) => t.stop()) }
+  }, [cameraStream])
+
+  const toggleCameraPreview = async () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach((t) => t.stop())
+      setCameraStream(null)
+      return
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: settings.videoDevice ? { deviceId: { exact: settings.videoDevice } } : true,
+      })
+      setCameraStream(stream)
+    } catch { /* camera not available */ }
+  }
 
   const update = (partial: Partial<MediaSettings>) => {
     const next = { ...settings, ...partial }
@@ -48,11 +73,12 @@ export default function SettingsPanel({ onClose }: Props) {
   const handleSaveProfile = async () => {
     setProfileSaving(true)
     try {
-      await api.updateMe({
+      const updated = await api.updateMe({
         display_name: displayName,
         custom_status: customStatus,
         name_color: nameColor,
       })
+      updateUser(updated)
       setProfileSaved(true)
       setTimeout(() => setProfileSaved(false), 2000)
     } catch { /* ignore */ }
@@ -78,6 +104,29 @@ export default function SettingsPanel({ onClose }: Props) {
 
         {tab === 'profile' && (
           <div className="settings-body">
+            <div className="profile-preview-card">
+              <div className="profile-preview-avatar">
+                {user?.avatar_url ? (
+                  <img src={user.avatar_url} alt="" className="profile-preview-avatar-img" />
+                ) : (
+                  <span className="profile-preview-avatar-fallback">
+                    {(displayName || user?.display_name)?.[0]?.toUpperCase() ?? '?'}
+                  </span>
+                )}
+                <span className="profile-preview-status-dot online" />
+              </div>
+              <div className="profile-preview-info">
+                <span className="profile-preview-name" style={{ color: nameColor || 'var(--text-primary)' }}>
+                  {displayName || user?.display_name || 'Display Name'}
+                </span>
+                {customStatus ? (
+                  <span className="profile-preview-status">{customStatus}</span>
+                ) : (
+                  <span className="profile-preview-username">@{user?.username}</span>
+                )}
+              </div>
+            </div>
+
             <h3 className="settings-section">Display Name</h3>
             <input
               type="text"
@@ -207,6 +256,18 @@ export default function SettingsPanel({ onClose }: Props) {
                   </option>
                 ))}
               </select>
+              <button className="settings-preview-btn" onClick={toggleCameraPreview}>
+                {cameraStream ? 'Stop Preview' : 'Preview Camera'}
+              </button>
+              {cameraStream && (
+                <video
+                  className="settings-camera-preview"
+                  autoPlay
+                  playsInline
+                  muted
+                  ref={(el) => { if (el) el.srcObject = cameraStream }}
+                />
+              )}
             </div>
           )
         )}

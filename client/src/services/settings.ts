@@ -31,17 +31,11 @@ export function saveSettings(s: MediaSettings) {
 }
 
 export async function getDevices() {
-  // Request permission first so labels are populated
+  // Only request audio permission for device labels — no camera
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true })
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     stream.getTracks().forEach((t) => t.stop())
-  } catch {
-    // Try audio-only
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      stream.getTracks().forEach((t) => t.stop())
-    } catch { /* no devices accessible */ }
-  }
+  } catch { /* no devices accessible */ }
 
   const devices = await navigator.mediaDevices.enumerateDevices()
   return {

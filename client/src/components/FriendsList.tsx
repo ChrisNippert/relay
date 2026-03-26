@@ -108,12 +108,13 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall }
     }
   }
 
-  // Deduplicate friends by the other user's ID
+  // Deduplicate friends by the other user's ID, only show if user data is loaded
   const seen = new Set<string>()
   const accepted = friends.filter((f) => {
     if (f.status !== 'accepted') return false
     const otherId = f.user_id === user?.id ? f.friend_id : f.user_id
     if (seen.has(otherId)) return false
+    if (!friendUsers.has(otherId)) return false
     seen.add(otherId)
     return true
   })

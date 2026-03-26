@@ -38,6 +38,8 @@ export default function Home() {
   })
   const [voicePresence, setVoicePresence] = useState<Map<string, VoicePresenceUser[]>>(new Map())
   const [isAdmin, setIsAdmin] = useState(false)
+  const [showMembers, setShowMembers] = useState(true)
+  const [channelSidebarCollapsed, setChannelSidebarCollapsed] = useState(false)
 
   // Poll voice ref state to keep sidebar controls in sync
   const syncVoiceControls = useCallback(() => {
@@ -362,61 +364,75 @@ export default function Home() {
         onJoinByCode={handleJoinByCode}
       />
 
-      <div className="channel-sidebar">
+      <div className={`channel-sidebar ${channelSidebarCollapsed ? 'collapsed' : ''}`}>
         <div className="channel-sidebar-header">
-          <h2>{view === 'dm' ? 'Direct Messages' : selectedServer?.name}</h2>
-          {view === 'server' && selectedServer && (
+          <button className="sidebar-collapse-btn" onClick={() => setChannelSidebarCollapsed(!channelSidebarCollapsed)} title={channelSidebarCollapsed ? 'Expand' : 'Collapse'}>
+            {channelSidebarCollapsed ? '»' : '«'}
+          </button>
+          {!channelSidebarCollapsed && (
             <>
-              <button className="invite-btn" onClick={handleShowInvites} title="Invite People">
-                🔗
-              </button>
-              <button className="invite-btn" onClick={() => setShowServerSettings(true)} title="Server Settings">
-                ⚙️
-              </button>
+              <h2>{view === 'dm' ? 'Direct Messages' : selectedServer?.name}</h2>
+              {view === 'server' && selectedServer && (
+                <>
+                  <button className="invite-btn" onClick={handleShowInvites} title="Invite People">
+                    🔗
+                  </button>
+                  <button className="invite-btn" onClick={() => setShowServerSettings(true)} title="Server Settings">
+                    ⚙️
+                  </button>
+                </>
+              )}
             </>
           )}
         </div>
 
-        {showInvitePanel && selectedServer && (
-          <div className="invite-panel">
-            <div className="invite-panel-header">
-              <h3>Invite People</h3>
-              <button className="close-btn" onClick={() => setShowInvitePanel(false)}>×</button>
-            </div>
-            <button className="create-invite-btn" onClick={handleCreateInvite}>Generate Invite Code</button>
-            {invites.length > 0 && (
-              <div className="invite-list">
-                {invites.map((inv) => (
-                  <div key={inv.id} className="invite-item">
-                    <code className="invite-code">{inv.code}</code>
-                    <span className="invite-uses">
-                      {inv.uses}{inv.max_uses > 0 ? `/${inv.max_uses}` : ''} uses
-                    </span>
-                    <button className="invite-copy" onClick={() => copyToClipboard(inv.code)} title="Copy code">
-                      {copiedCode === inv.code ? '✓' : '📋'}
-                    </button>
-                    <button className="invite-delete" onClick={() => handleDeleteInvite(inv.id)} title="Delete invite">
-                      🗑
-                    </button>
+        {!channelSidebarCollapsed && (
+          <>
+            {showInvitePanel && selectedServer && (
+              <div className="invite-panel">
+                <div className="invite-panel-header">
+                  <h3>Invite People</h3>
+                  <button className="close-btn" onClick={() => setShowInvitePanel(false)}>×</button>
+                </div>
+                <button className="create-invite-btn" onClick={handleCreateInvite}>Generate Invite Code</button>
+                {invites.length > 0 && (
+                  <div className="invite-list">
+                    {invites.map((inv) => (
+                      <div key={inv.id} className="invite-item">
+                        <code className="invite-code">{inv.code}</code>
+                        <span className="invite-uses">
+                          {inv.uses}{inv.max_uses > 0 ? `/${inv.max_uses}` : ''} uses
+                        </span>
+                        <button className="invite-copy" onClick={() => copyToClipboard(inv.code)} title="Copy code">
+                          {copiedCode === inv.code ? '✓' : '📋'}
+                        </button>
+                        <button className="invite-delete" onClick={() => handleDeleteInvite(inv.id)} title="Delete invite">
+                          🗑
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
               </div>
             )}
-          </div>
-        )}
 
-        {view === 'dm' ? (
-          <FriendsList dmChannels={dmChannels} onSelectChannel={handleSelectChannel} onStartCall={handleStartDMCall} />
-        ) : (
-          <ChannelList
-            channels={channels}
-            selected={selectedChannel}
-            onSelect={handleSelectChannel}
-            voicePresence={voicePresence}
-            isAdmin={isAdmin}
-            serverId={selectedServer?.id}
-            onChannelsChanged={refreshChannels}
-          />
+            <div className="sidebar-panels-container">
+              <div className={`sidebar-panel ${view === 'dm' ? 'active' : ''}`}>
+                <FriendsList dmChannels={dmChannels} onSelectChannel={handleSelectChannel} onStartCall={handleStartDMCall} />
+              </div>
+              <div className={`sidebar-panel ${view === 'server' ? 'active' : ''}`}>
+                <ChannelList
+                  channels={channels}
+                  selected={selectedChannel}
+                  onSelect={handleSelectChannel}
+                  voicePresence={voicePresence}
+                  isAdmin={isAdmin}
+                  serverId={selectedServer?.id}
+                  onChannelsChanged={refreshChannels}
+                />
+              </div>
+            </div>
+          </>
         )}
 
         {/* Voice status bar — Discord-style, shows when connected to voice */}
@@ -483,9 +499,31 @@ export default function Home() {
           </div>
         )}
 
-        <div className="user-bar">
-          <button className="user-bar-btn" onClick={() => setShowSettings(true)} title="Settings">⚙️</button>
-          <button className="link-btn" onClick={logout}>Logout</button>
+        <div className="user-panel">
+          <div className="user-panel-info">
+            <div className="user-panel-avatar">
+              {user?.avatar_url ? (
+                <img src={user.avatar_url} alt="" className="user-panel-avatar-img" />
+              ) : (
+                <span className="user-panel-avatar-fallback">{user?.display_name?.[0]?.toUpperCase() ?? '?'}</span>
+              )}
+              <span className="user-panel-status-dot online" />
+            </div>
+            <div className="user-panel-names">
+              <span className="user-panel-display" style={user?.name_color ? { color: user.name_color } : undefined}>
+                {user?.display_name}
+              </span>
+              {user?.custom_status ? (
+                <span className="user-panel-status-text">{user.custom_status}</span>
+              ) : (
+                <span className="user-panel-username">@{user?.username}</span>
+              )}
+            </div>
+          </div>
+          <div className="user-panel-buttons">
+            <button className="user-panel-btn" onClick={() => setShowSettings(true)} title="Settings">⚙️</button>
+            <button className="user-panel-btn logout" onClick={logout} title="Log Out">🚪</button>
+          </div>
         </div>
       </div>
 
@@ -514,7 +552,8 @@ export default function Home() {
               onEnd={() => setDmCall(null)}
             />
           ) : selectedChannel && !isVoiceChannel ? (
-            <ChatView channel={selectedChannel} onStartCall={handleStartDMCall} onDMUser={handleDMUser} />
+            <ChatView channel={selectedChannel} onStartCall={handleStartDMCall} onDMUser={handleDMUser}
+              showMembersToggle={view === 'server'} showMembers={showMembers} onToggleMembers={() => setShowMembers((p) => !p)} />
           ) : !selectedChannel ? (
             <div className="no-channel">
               <p>Select a channel to start chatting</p>
@@ -525,7 +564,9 @@ export default function Home() {
 
       {/* Members sidebar for servers */}
       {view === 'server' && selectedServer && (
-        <MembersSidebar serverId={selectedServer.id} onMessage={handleDMUser} isAdmin={isAdmin} />
+        <div className={`members-sidebar-wrapper ${showMembers ? 'open' : ''}`}>
+          <MembersSidebar serverId={selectedServer.id} onMessage={handleDMUser} isAdmin={isAdmin} />
+        </div>
       )}
 
       {/* Settings Modal */}

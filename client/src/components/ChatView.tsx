@@ -11,6 +11,9 @@ interface Props {
   channel: Channel
   onStartCall?: (userId: string, video: boolean) => void
   onDMUser?: (userId: string) => void
+  showMembersToggle?: boolean
+  showMembers?: boolean
+  onToggleMembers?: () => void
 }
 
 const URL_REGEX = /https?:\/\/[^\s<]+/g
@@ -176,12 +179,14 @@ function LinkEmbed({ url }: { url: string }) {
   )
 }
 
-export default function ChatView({ channel, onStartCall, onDMUser }: Props) {
+export default function ChatView({ channel, onStartCall, onDMUser, showMembersToggle, showMembers, onToggleMembers }: Props) {
   const { user } = useAuth()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map())
   const [dmPartnerId, setDmPartnerId] = useState<string | null>(null)
+  const [dmPartnerName, setDmPartnerName] = useState<string>('')
+  const [initialScrollDone, setInitialScrollDone] = useState(false)
   const [pendingFiles, setPendingFiles] = useState<{file: File; id?: string; progress: number; error?: string}[]>([])
   const [uploading, setUploading] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
@@ -205,17 +210,24 @@ export default function ChatView({ channel, onStartCall, onDMUser }: Props) {
   const initialLoadRef = useRef(true)
   const userNameCache = useRef<Map<string, string>>(new Map())
 
-  // Resolve DM partner for call buttons
+  // Resolve DM partner for call buttons and header name
   useEffect(() => {
-    if (!channel.server_id && onStartCall) {
-      api.getDMParticipants(channel.id).then((parts) => {
+    if (!channel.server_id) {
+      api.getDMParticipants(channel.id).then(async (parts) => {
         const other = parts.find((id: string) => id !== user?.id)
         setDmPartnerId(other ?? null)
-      }).catch(() => setDmPartnerId(null))
+        if (other) {
+          try {
+            const u = await api.getUser(other)
+            setDmPartnerName(u.display_name || u.username)
+          } catch { setDmPartnerName('') }
+        }
+      }).catch(() => { setDmPartnerId(null); setDmPartnerName('') })
     } else {
       setDmPartnerId(null)
+      setDmPartnerName('')
     }
-  }, [channel.id, channel.server_id, user?.id, onStartCall])
+  }, [channel.id, channel.server_id, user?.id])
 
   // Check if channel has E2E encryption enabled
   useEffect(() => {
@@ -268,6 +280,7 @@ export default function ChatView({ channel, onStartCall, onDMUser }: Props) {
     setHasMore(true)
     setReplyingTo(null)
     setEditingMsg(null)
+    setInitialScrollDone(false)
     initialLoadRef.current = true
     api.getMessages(channel.id).then(async (msgs) => {
       const ordered = msgs.reverse()
@@ -345,6 +358,7 @@ export default function ChatView({ channel, onStartCall, onDMUser }: Props) {
       initialLoadRef.current = false
       requestAnimationFrame(() => {
         bottomRef.current?.scrollIntoView()
+        setInitialScrollDone(true)
       })
     } else if (isAtBottomRef.current) {
       requestAnimationFrame(() => {
@@ -591,22 +605,33 @@ export default function ChatView({ channel, onStartCall, onDMUser }: Props) {
     >
       <div className="chat-header">
         <span className="chat-header-name">
-          {channel.server_id ? '#' : '💬'} {channel.name}
+          {channel.server_id ? '#' : '💬'} {channel.server_id ? channel.name : (dmPartnerName || channel.name)}
           {encrypted && <span className="chat-header-lock" title="End-to-end encrypted">🔒</span>}
         </span>
-        {dmPartnerId && onStartCall && (
-          <div className="chat-header-actions">
-            <button className="chat-call-btn" onClick={() => onStartCall(dmPartnerId, false)} title="Voice Call">
-              📞
+        <div className="chat-header-actions">
+          {dmPartnerId && onStartCall && (
+            <>
+              <button className="chat-call-btn" onClick={() => onStartCall(dmPartnerId, false)} title="Voice Call">
+                📞
+              </button>
+              <button className="chat-call-btn" onClick={() => onStartCall(dmPartnerId, true)} title="Video Call">
+                📹
+              </button>
+            </>
+          )}
+          {showMembersToggle && (
+            <button
+              className={`chat-header-toggle ${showMembers ? 'active' : ''}`}
+              onClick={onToggleMembers}
+              title={showMembers ? 'Hide Members' : 'Show Members'}
+            >
+              👥
             </button>
-            <button className="chat-call-btn" onClick={() => onStartCall(dmPartnerId, true)} title="Video Call">
-              📹
-            </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      <div className="message-list" ref={listRef} onScroll={handleScroll}>
+      <div className="message-list" ref={listRef} onScroll={handleScroll} style={!initialScrollDone && messages.length > 0 ? { visibility: 'hidden' } : undefined}>
         {loadingOlder && <div className="loading-older">Loading older messages...</div>}
         {messages.map((m, i) => {
           const urls = extractUrls(m.content)
@@ -663,11 +688,11 @@ export default function ChatView({ channel, onStartCall, onDMUser }: Props) {
                   <div className="message-header">
                     <span
                       className="message-author clickable"
-                      style={m.author?.name_color ? { color: m.author.name_color } : undefined}
+                      style={(m.user_id === user?.id && user?.name_color) ? { color: user.name_color } : m.author?.name_color ? { color: m.author.name_color } : undefined}
                       onClick={(e) => {
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
                       setPopover({ userId: m.user_id, rect })
-                    }}>{m.author?.display_name ?? m.user_id}</span>
+                    }}>{m.user_id === user?.id ? (user?.display_name ?? m.author?.display_name ?? m.user_id) : (m.author?.display_name ?? m.user_id)}</span>
                     <span className="message-time">{formatTime(m.created_at)}</span>
                   </div>
                 )}
@@ -791,7 +816,7 @@ export default function ChatView({ channel, onStartCall, onDMUser }: Props) {
             ref={inputRef}
             value={input}
             onChange={(e) => handleInput(e.target.value)}
-            placeholder={editingMsg ? 'Edit message…' : `Message ${channel.server_id ? '#' + channel.name : channel.name}`}
+            placeholder={editingMsg ? 'Edit message…' : `Message ${channel.server_id ? '#' + channel.name : (dmPartnerName || channel.name || 'this channel')}`}
             autoFocus
             rows={1}
             className="message-textarea"

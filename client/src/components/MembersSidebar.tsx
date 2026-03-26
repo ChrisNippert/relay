@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ServerMember, User, WSMessage as WSMsg } from '../types'
 import * as api from '../services/api'
 import { subscribe } from '../services/ws'
+import { useAuth } from '../context/AuthContext'
 import UserPopover from './UserPopover'
 
 interface MembersSidebarProps {
@@ -16,6 +17,7 @@ interface MemberInfo {
 }
 
 export default function MembersSidebar({ serverId, onMessage, isAdmin }: MembersSidebarProps) {
+  const { user: me } = useAuth()
   const [members, setMembers] = useState<MemberInfo[]>([])
   const [onlineUserIds, setOnlineUserIds] = useState<Set<string>>(new Set())
   const [popover, setPopover] = useState<{ userId: string; rect: DOMRect } | null>(null)
@@ -37,13 +39,24 @@ export default function MembersSidebar({ serverId, onMessage, isAdmin }: Members
         }
         if (!cancelled) {
           setMembers(infos)
-          setOnlineUserIds(new Set(onlineIds || []))
+          // Always include self in online set (we're viewing the page)
+          const ids = new Set(onlineIds || [])
+          if (me?.id) ids.add(me.id)
+          setOnlineUserIds(ids)
         }
       } catch { /* ignore */ }
     }
     load()
     return () => { cancelled = true }
-  }, [serverId])
+  }, [serverId, me?.id])
+
+  // Keep own user data in sync with auth context
+  useEffect(() => {
+    if (!me) return
+    setMembers((prev) => prev.map((m) =>
+      m.user.id === me.id ? { ...m, user: { ...m.user, display_name: me.display_name, name_color: me.name_color, custom_status: me.custom_status, avatar_url: me.avatar_url } } : m
+    ))
+  }, [me?.display_name, me?.name_color, me?.custom_status, me?.avatar_url])
 
   // Listen for presence changes
   useEffect(() => {
