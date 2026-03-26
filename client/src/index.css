@@ -1,3 +1,58 @@
+.reply-jump-btn {
+  margin-left: 8px;
+  font-size: 0.75em;
+  color: var(--accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0 2px;
+  opacity: 0.8;
+  transition: color 0.15s, opacity 0.15s;
+}
+.reply-jump-btn:hover {
+  color: var(--accent-hover);
+  opacity: 1;
+}
+/* Replying to line above message */
+.replying-to-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin-bottom: 3px;
+  padding: 2px 6px;
+  border-left: 2px solid var(--accent);
+  background: rgba(233, 69, 96, 0.07);
+  border-radius: 0 4px 4px 0;
+  cursor: pointer;
+  transition: background 0.15s;
+  max-width: fit-content;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.replying-to-line:hover {
+  background: rgba(233, 69, 96, 0.15);
+}
+.reply-indicator-arrow {
+  font-size: 0.85rem;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.replying-to-author {
+  color: var(--accent);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.replying-to-snippet {
+  color: var(--text-muted);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 :root {
   --bg-primary: #1a1a2e;
   --bg-secondary: #16213e;
@@ -788,7 +843,9 @@ html, body, #root {
   border-top: 1px solid var(--border);
 }
 
-.message-input input {
+
+.message-input input,
+.message-textarea {
   flex: 1;
   padding: 10px 14px;
   border-radius: 8px;
@@ -797,9 +854,14 @@ html, body, #root {
   color: var(--text-primary);
   font-size: 0.95rem;
   outline: none;
+  resize: vertical;
+  min-height: 38px;
+  max-height: 160px;
+  line-height: 1.4;
 }
 
-.message-input input:focus {
+.message-input input:focus,
+.message-textarea:focus {
   border-color: var(--accent);
 }
 
@@ -1811,6 +1873,25 @@ html, body, #root {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  transition: background 0.15s;
+}
+.reply-preview-clickable {
+  cursor: pointer;
+}
+.reply-preview-clickable:hover {
+  background: rgba(233, 69, 96, 0.13);
+}
+
+/* Highlight for jumped-to message */
+.reply-jump-highlight {
+  animation: replyJumpFlash 1.2s;
+  background: rgba(233, 69, 96, 0.18) !important;
+  z-index: 10;
+}
+@keyframes replyJumpFlash {
+  0% { background: rgba(233, 69, 96, 0.28); }
+  60% { background: rgba(233, 69, 96, 0.18); }
+  100% { background: rgba(233, 69, 96, 0.08); }
 }
 .reply-preview-author {
   font-weight: 600;
@@ -1856,22 +1937,27 @@ html, body, #root {
   display: flex;
 }
 .message:hover {
-  z-index: 5; /* lift above surrounding messages so actions aren't clipped */
+  background: rgba(233, 69, 96, 0.08);
+  z-index: 5;
 }
+
 .msg-action-btn {
   background: none;
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 0.85rem;
-  padding: 2px 5px;
+  font-size: 1.08rem;
+  padding: 4px 8px;
   border-radius: 4px;
   line-height: 1;
+  transition: background 0.15s, color 0.15s, font-size 0.15s;
 }
+
 .msg-action-btn:hover {
   background: var(--bg-hover, #2a2a3e);
   color: var(--text-primary);
 }
+
 .msg-action-delete:hover {
   color: #f87171;
 }
@@ -2041,4 +2127,12 @@ html, body, #root {
   text-align: center;
   color: var(--text-secondary);
   font-size: 0.9rem;
+}
+
+.history-entry-hover {
+  background: rgba(233, 69, 96, 0.10);
+}
+.history-entry-original {
+  border-left: 3px solid var(--accent);
+  background: rgba(233, 69, 96, 0.07);
 }

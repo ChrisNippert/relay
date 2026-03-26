@@ -46,12 +46,20 @@ function renderFormattedText(text: string, keyPrefix: string): (string | React.R
 }
 
 function renderMessageContent(content: string) {
+  // Split by URLs, then by newlines, and preserve <br> for newlines
   const parts = content.split(URL_REGEX)
   const urls = content.match(URL_REGEX) || []
   const result: (string | React.ReactElement)[] = []
 
   parts.forEach((part, i) => {
-    if (part) result.push(...renderFormattedText(part, `f${i}`))
+    if (part) {
+      // Split by newlines and interleave <br />
+      const lines = part.split(/\n/)
+      lines.forEach((line, j) => {
+        if (line) result.push(...renderFormattedText(line, `f${i}-${j}`))
+        if (j < lines.length - 1) result.push(<br key={`br-${i}-${j}`} />)
+      })
+    }
     if (urls[i]) {
       result.push(
         <a key={`u${i}`} href={urls[i]} target="_blank" rel="noreferrer noopener" className="message-link">
@@ -83,7 +91,7 @@ export default function ChatView({ channel, onStartCall }: Props) {
   const listRef = useRef<HTMLDivElement>(null)
   const typingTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
   const initialLoadRef = useRef(true)
   const userNameCache = useRef<Map<string, string>>(new Map())
 
@@ -352,6 +360,19 @@ export default function ChatView({ channel, onStartCall }: Props) {
     return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
   }
 
+  // Map of message IDs to refs for scrolling
+  const messageRefs = useRef<{ [id: string]: HTMLDivElement | null }>({})
+
+  // Scroll to a message by ID
+  const scrollToMessage = (id: string) => {
+    const el = messageRefs.current[id]
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el.classList.add('reply-jump-highlight')
+      setTimeout(() => el.classList.remove('reply-jump-highlight'), 1200)
+    }
+  }
+
   return (
     <div className="chat-view">
       <div className="chat-header">
@@ -381,7 +402,12 @@ export default function ChatView({ channel, onStartCall }: Props) {
             new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < 5 * 60 * 1000
 
           return (
-            <div key={m.id} className={`message ${m.user_id === user?.id ? 'own' : ''} ${isGrouped ? 'grouped' : ''}`}>
+            <div
+              key={m.id}
+              className={`message ${m.user_id === user?.id ? 'own' : ''} ${isGrouped ? 'grouped' : ''}`}
+              ref={el => { messageRefs.current[m.id] = el }}
+              data-msgid={m.id}
+            >
               <div className="message-actions">
                 <button className="msg-action-btn" onClick={() => handleReply(m)} title="Reply">↩</button>
                 {(m.edited || m.deleted) && (
@@ -398,12 +424,26 @@ export default function ChatView({ channel, onStartCall }: Props) {
                 {isGrouped && <span className="message-gutter-time">{formatTime(m.created_at)}</span>}
               </div>
               <div className="message-content">
-                {m.reply_to && (
-                  <div className="reply-preview">
-                    <span className="reply-preview-author">{m.reply_to.author?.display_name ?? m.reply_to.user_id}</span>
-                    <span className="reply-preview-content">{m.reply_to.content.slice(0, 80)}{m.reply_to.content.length > 80 ? '…' : ''}</span>
-                  </div>
-                )}
+                {/* Reply indicator */}
+                {(m.reply_to || m.reply_to_id) && (() => {
+                  // Resolve the replied-to message from local state for best author data
+                  const replyMsg = m.reply_to || messages.find(x => x.id === m.reply_to_id)
+                  if (!replyMsg) return null
+                  const authorName = replyMsg.author?.display_name || replyMsg.author?.username || replyMsg.user_id
+                  return (
+                    <div
+                      className="replying-to-line"
+                      title="Jump to original message"
+                      onClick={() => scrollToMessage(replyMsg.id)}
+                      tabIndex={0}
+                      role="button"
+                    >
+                      <span className="reply-indicator-arrow">↩</span>
+                      <span className="replying-to-author">{authorName}</span>
+                      <span className="replying-to-snippet">{replyMsg.content.slice(0, 80)}{replyMsg.content.length > 80 ? '…' : ''}</span>
+                    </div>
+                  )
+                })()}
                 {!isGrouped && (
                   <div className="message-header">
                     <span className="message-author">{m.author?.display_name ?? m.user_id}</span>
@@ -416,7 +456,13 @@ export default function ChatView({ channel, onStartCall }: Props) {
                   <div className="message-body">
                     {renderMessageContent(m.content)}
                     {m.edited && (
-                      <span className="edited-badge" onClick={() => handleHistoryClick(m)} title="View edit history">(edited)</span>
+                      <span
+                        className="edited-badge"
+                        onClick={() => handleHistoryClick(m)}
+                        title={`Last edited: ${formatDateTime(m.updated_at)}`}
+                      >
+                        (edited)
+                      </span>
                     )}
                   </div>
                 )}
@@ -508,13 +554,21 @@ export default function ChatView({ channel, onStartCall }: Props) {
           <button type="button" className="upload-btn" onClick={() => fileInputRef.current?.click()} title="Upload file">
             📎
           </button>
-          <input
+          <textarea
             ref={inputRef}
-            type="text"
             value={input}
             onChange={(e) => handleInput(e.target.value)}
             placeholder={editingMsg ? 'Edit message…' : `Message ${channel.server_id ? '#' + channel.name : channel.name}`}
             autoFocus
+            rows={1}
+            className="message-textarea"
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                (e.target as HTMLTextAreaElement).blur();
+                handleSend(e as unknown as FormEvent);
+              }
+            }}
           />
           <button type="submit" disabled={uploading}>{uploading ? '...' : editingMsg ? 'Save' : 'Send'}</button>
         </form>
@@ -528,19 +582,38 @@ export default function ChatView({ channel, onStartCall }: Props) {
               <button className="history-modal-close" onClick={() => setHistoryMsg(null)}>×</button>
             </div>
             <div className="history-modal-body">
+              {/* Original message */}
+              <div className="history-entry history-entry-original">
+                <div className="history-entry-time">Original — {historyMsg ? formatDateTime(historyMsg.created_at) : ''}</div>
+                <div className="history-entry-content">{editHistory.length > 0 ? (editHistory[0]?.content ?? '') : historyMsg?.content ?? ''}</div>
+              </div>
               {editHistory.length === 0 ? (
                 <div className="history-empty">No edit history available.</div>
               ) : (
-                editHistory.map((h) => (
-                  <div key={h.id} className="history-entry">
-                    <div className="history-entry-time">{formatDateTime(h.edited_at)}</div>
-                    <div className="history-entry-content">{h.content}</div>
-                  </div>
-                ))
+                editHistory.map((h, idx) => {
+                  // Hide first edit if it is identical to the original
+                  if (idx === 0 && h.content === (editHistory[0]?.content ?? historyMsg?.content)) return null;
+                  const prevEdit = idx > 0 ? editHistory[idx - 1] : null
+                  return (
+                    <div key={h.id} className="history-entry"
+                      onMouseEnter={e => e.currentTarget.classList.add('history-entry-hover')}
+                      onMouseLeave={e => e.currentTarget.classList.remove('history-entry-hover')}
+                    >
+                      <div className="history-entry-time">
+                        {idx === 0
+                          ? `Edited — ${historyMsg ? formatDateTime(historyMsg.created_at) : ''}`
+                          : `Edited — ${prevEdit ? formatDateTime(prevEdit.edited_at) : ''}`}
+                      </div>
+                      <div className="history-entry-content">{h.content}</div>
+                    </div>
+                  );
+                })
               )}
               <div className="history-entry history-entry-current">
-                <div className="history-entry-time">Current{historyMsg.deleted ? ' — deleted' : ''}</div>
-                <div className={`history-entry-content${historyMsg.deleted ? ' message-deleted' : ''}`}>{historyMsg.deleted ? 'This message was deleted.' : historyMsg.content}</div>
+                <div className="history-entry-time">
+                  Current{historyMsg?.deleted ? ' — deleted' : ''} — {editHistory.length > 0 ? formatDateTime(editHistory[editHistory.length - 1]?.edited_at ?? '') : historyMsg ? formatDateTime(historyMsg.created_at) : ''}
+                </div>
+                <div className={`history-entry-content${historyMsg?.deleted ? ' message-deleted' : ''}`}>{historyMsg?.deleted ? 'This message was deleted.' : historyMsg?.content}</div>
               </div>
             </div>
           </div>
