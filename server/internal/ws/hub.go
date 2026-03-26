@@ -9,9 +9,9 @@ import (
 )
 
 type Hub struct {
-	db         *db.DB
-	clients       map[string]*Client          // userID -> Client
-	voiceChannels map[string]map[string]bool   // channelID -> set of userIDs
+	db            *db.DB
+	clients       map[string]map[*Client]bool // userID -> set of active connections
+	voiceChannels map[string]map[string]bool  // channelID -> set of userIDs
 	register      chan *Client
 	unregister    chan *Client
 	mu            sync.RWMutex
@@ -19,8 +19,8 @@ type Hub struct {
 
 func NewHub(database *db.DB) *Hub {
 	return &Hub{
-		db:         database,
-		clients:       make(map[string]*Client),
+		db:            database,
+		clients:       make(map[string]map[*Client]bool),
 		voiceChannels: make(map[string]map[string]bool),
 		register:      make(chan *Client),
 		unregister:    make(chan *Client),
@@ -32,29 +32,41 @@ func (h *Hub) Run() {
 		select {
 		case client := <-h.register:
 			h.mu.Lock()
-			if existing, ok := h.clients[client.userID]; ok {
-				close(existing.send)
-				existing.conn.Close()
+			if h.clients[client.userID] == nil {
+				h.clients[client.userID] = make(map[*Client]bool)
 			}
-			h.clients[client.userID] = client
+			h.clients[client.userID][client] = true
+			isFirst := len(h.clients[client.userID]) == 1
 			h.mu.Unlock()
 
-			log.Printf("User %s connected", client.userID)
-			h.db.UpdateUserStatus(client.userID, "online")
-			h.broadcastPresence(client.userID, "online")
+			log.Printf("User %s connected (%d sessions)", client.userID, func() int {
+				h.mu.RLock()
+				n := len(h.clients[client.userID])
+				h.mu.RUnlock()
+				return n
+			}())
+			if isFirst {
+				h.db.UpdateUserStatus(client.userID, "online")
+				h.broadcastPresence(client.userID, "online")
+			}
 
 		case client := <-h.unregister:
 			h.mu.Lock()
-			if existing, ok := h.clients[client.userID]; ok && existing == client {
+			conns := h.clients[client.userID]
+			delete(conns, client)
+			close(client.send)
+			isEmpty := len(conns) == 0
+			if isEmpty {
 				delete(h.clients, client.userID)
-				close(client.send)
 			}
 			h.mu.Unlock()
 
 			log.Printf("User %s disconnected", client.userID)
-			h.db.UpdateUserStatus(client.userID, "offline")
-			h.broadcastPresence(client.userID, "offline")
-			HandleDisconnect(h, client.userID)
+			if isEmpty {
+				h.db.UpdateUserStatus(client.userID, "offline")
+				h.broadcastPresence(client.userID, "offline")
+				HandleDisconnect(h, client.userID)
+			}
 		}
 	}
 }
@@ -72,20 +84,22 @@ func (h *Hub) broadcastPresence(userID, status string) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	for _, client := range h.clients {
-		select {
-		case client.send <- data:
-		default:
+	for _, conns := range h.clients {
+		for client := range conns {
+			select {
+			case client.send <- data:
+			default:
+			}
 		}
 	}
 }
 
-// SendToUser sends a message to a specific connected user.
+// SendToUser sends a message to all active connections for a user.
 func (h *Hub) SendToUser(userID string, data []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	if client, ok := h.clients[userID]; ok {
+	for client := range h.clients[userID] {
 		select {
 		case client.send <- data:
 		default:
@@ -121,7 +135,7 @@ func (h *Hub) SendToChannel(channelID string, data []byte, excludeUserID string)
 		if uid == excludeUserID {
 			continue
 		}
-		if client, ok := h.clients[uid]; ok {
+		for client := range h.clients[uid] {
 			select {
 			case client.send <- data:
 			default:

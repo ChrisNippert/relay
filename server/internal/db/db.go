@@ -31,8 +31,19 @@ func New(path string) (*DB, error) {
 }
 
 func (db *DB) migrate() error {
-	_, err := db.Exec(schema)
-	return err
+	if _, err := db.Exec(schema); err != nil {
+		return err
+	}
+	// Add columns that may be missing on pre-existing databases.
+	// SQLite errors if a column already exists, so we ignore those errors.
+	alterations := []string{
+		`ALTER TABLE messages ADD COLUMN reply_to_id TEXT REFERENCES messages(id) ON DELETE SET NULL`,
+		`ALTER TABLE messages ADD COLUMN edited INTEGER DEFAULT 0`,
+	}
+	for _, stmt := range alterations {
+		db.Exec(stmt) // intentionally ignore "duplicate column" errors
+	}
+	return nil
 }
 
 const schema = `

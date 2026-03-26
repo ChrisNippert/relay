@@ -126,35 +126,59 @@ func apiJSON[T any](c *client, method, path string, body any) (T, error) {
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 
-func (c *client) connectWS() error {
+func (c *client) wsURL() string {
 	u, _ := url.Parse(c.base)
 	scheme := "wss"
 	if u.Scheme == "http" {
 		scheme = "ws"
 	}
-	wsURL := fmt.Sprintf("%s://%s/api/ws?token=%s", scheme, u.Host, url.QueryEscape(c.token))
+	return fmt.Sprintf("%s://%s/api/ws?token=%s", scheme, u.Host, url.QueryEscape(c.token))
+}
+
+func (c *client) connectWS() error {
 	dialer := websocket.Dialer{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	conn, _, err := dialer.Dial(wsURL, nil)
+	conn, _, err := dialer.Dial(c.wsURL(), nil)
 	if err != nil {
 		return err
 	}
 	c.ws = conn
-	go func() {
-		for {
-			_, data, err := conn.ReadMessage()
-			if err != nil {
-				return
-			}
-			var env WSEnvelope
-			if json.Unmarshal(data, &env) == nil {
-				c.inbox <- env
-			}
-		}
-	}()
+	go c.readPump(conn)
 	return nil
 }
 
+// readPump reads from a WS connection and forwards to inbox.
+// On disconnect it drains the inbox sentinel and reconnects automatically.
+func (c *client) readPump(conn *websocket.Conn) {
+	dialer := websocket.Dialer{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	for {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			// Signal disconnect to the chat loop
+			c.inbox <- WSEnvelope{Type: "__disconnect__"}
+			// Reconnect loop
+			for {
+				time.Sleep(2 * time.Second)
+				newConn, _, err2 := dialer.Dial(c.wsURL(), nil)
+				if err2 == nil {
+					c.ws = newConn
+					conn = newConn
+					c.inbox <- WSEnvelope{Type: "__reconnected__"}
+					break
+				}
+			}
+			continue
+		}
+		var env WSEnvelope
+		if json.Unmarshal(data, &env) == nil {
+			c.inbox <- env
+		}
+	}
+}
+
 func (c *client) sendWS(typ string, payload any) {
+	if c.ws == nil {
+		return
+	}
 	data, _ := json.Marshal(map[string]any{"type": typ, "payload": payload})
 	c.ws.WriteMessage(websocket.TextMessage, data)
 }
@@ -345,6 +369,12 @@ func (c *client) chat(ch Channel) {
 		select {
 		case env := <-c.inbox:
 			switch env.Type {
+			case "__disconnect__":
+				fmt.Printf("\r⚠ Disconnected, reconnecting...\n> ")
+				continue
+			case "__reconnected__":
+				fmt.Printf("\r✓ Reconnected\n> ")
+				continue
 			case "chat_message":
 				var m Message
 				if json.Unmarshal(env.Payload, &m) == nil && m.ChannelID == ch.ID {
