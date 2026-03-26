@@ -22,9 +22,9 @@ func (db *DB) GetMessage(id string) (*models.Message, error) {
 	m := &models.Message{}
 	var replyToID sql.NullString
 	err := db.QueryRow(
-		`SELECT id, channel_id, user_id, content, nonce, type, reply_to_id, edited, created_at, updated_at FROM messages WHERE id = ?`,
+		`SELECT id, channel_id, user_id, content, nonce, type, reply_to_id, edited, deleted, created_at, updated_at FROM messages WHERE id = ?`,
 		id,
-	).Scan(&m.ID, &m.ChannelID, &m.UserID, &m.Content, &m.Nonce, &m.Type, &replyToID, &m.Edited, &m.CreatedAt, &m.UpdatedAt)
+	).Scan(&m.ID, &m.ChannelID, &m.UserID, &m.Content, &m.Nonce, &m.Type, &replyToID, &m.Edited, &m.Deleted, &m.CreatedAt, &m.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (db *DB) getMessageShallow(id string) (*models.Message, error) {
 		 FROM messages m
 		 JOIN users u ON m.user_id = u.id
 		 WHERE m.id = ?`, id,
-	).Scan(&m.ID, &m.ChannelID, &m.UserID, &m.Content, &m.Type, &replyToID, &m.Edited, &m.CreatedAt,
+	).Scan(&m.ID, &m.ChannelID, &m.UserID, &m.Content, &m.Type, &replyToID, &m.Edited, &m.Deleted, &m.CreatedAt,
 		&username, &displayName, &avatarURL)
 	if err != nil {
 		return nil, err
@@ -119,7 +119,7 @@ func (db *DB) GetMessageEditHistory(messageID string) ([]models.MessageEdit, err
 
 func (db *DB) GetMessages(channelID string, limit, offset int) ([]models.Message, error) {
 	rows, err := db.Query(
-		`SELECT m.id, m.channel_id, m.user_id, m.content, m.nonce, m.type, m.reply_to_id, m.edited, m.created_at, m.updated_at,
+		`SELECT m.id, m.channel_id, m.user_id, m.content, m.nonce, m.type, m.reply_to_id, m.edited, m.deleted, m.created_at, m.updated_at,
 		        u.username, u.display_name, u.avatar_url
 		 FROM messages m
 		 JOIN users u ON m.user_id = u.id
@@ -139,7 +139,7 @@ func (db *DB) GetMessages(channelID string, limit, offset int) ([]models.Message
 		var username, displayName, avatarURL string
 		var replyToID sql.NullString
 		if err := rows.Scan(&m.ID, &m.ChannelID, &m.UserID, &m.Content, &m.Nonce, &m.Type,
-			&replyToID, &m.Edited, &m.CreatedAt, &m.UpdatedAt, &username, &displayName, &avatarURL); err != nil {
+			&replyToID, &m.Edited, &m.Deleted, &m.CreatedAt, &m.UpdatedAt, &username, &displayName, &avatarURL); err != nil {
 			return nil, err
 		}
 		if replyToID.Valid {
@@ -165,4 +165,28 @@ func (db *DB) GetMessages(channelID string, limit, offset int) ([]models.Message
 		messages = append(messages, m)
 	}
 	return messages, rows.Err()
+}
+
+// DeleteMessage soft-deletes a message: records the original content in edit
+// history, replaces content with "[deleted]", and sets deleted=1.
+func (db *DB) DeleteMessage(id, requestingUserID string) (*models.Message, error) {
+	// Save current content as history entry so it shows in the history view
+	editID := uuid.New().String()
+	_, err := db.Exec(
+`INSERT INTO message_edits (id, message_id, content, edited_at)
+                 SELECT ?, ?, content, CURRENT_TIMESTAMP FROM messages WHERE id = ?`,
+editID, id, id,
+)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = db.Exec(
+`UPDATE messages SET content = '[deleted]', deleted = 1, edited = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+id,
+)
+	if err != nil {
+		return nil, err
+	}
+	return db.GetMessage(id)
 }

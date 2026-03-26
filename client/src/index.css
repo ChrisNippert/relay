@@ -656,12 +656,48 @@ html, body, #root {
 }
 
 .message {
-  max-width: 80%;
-  padding: 4px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 2px 0;
+  position: relative;
+  max-width: 100%;
 }
 
-.message.own {
-  align-self: flex-end;
+.message:not(.grouped) {
+  padding-top: 14px;
+}
+
+.message.grouped {
+  padding-top: 1px;
+}
+
+.message-gutter {
+  width: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 2px;
+}
+
+.message-gutter-time {
+  display: none;
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  text-align: center;
+  padding-top: 5px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.message:hover .message-gutter-time {
+  display: block;
+}
+
+.message-content {
+  flex: 1;
+  min-width: 0;
 }
 
 .message-header {
@@ -711,11 +747,6 @@ html, body, #root {
   font-size: 0.8rem;
   color: var(--text-muted);
   font-style: italic;
-}
-
-/* Grouped messages (consecutive same user) */
-.message.grouped {
-  padding-top: 0;
 }
 
 /* Spoiler text */
@@ -1810,20 +1841,22 @@ html, body, #root {
 .message-actions {
   display: none;
   position: absolute;
-  top: 2px;
-  right: 6px;
+  /* Appear above the message, anchored to its top-right */
+  bottom: calc(100% - 6px);
+  right: 4px;
   gap: 2px;
   background: var(--bg-secondary, #1e1e2e);
   border: 1px solid var(--border, #3a3a5c);
   border-radius: 6px;
   padding: 2px 4px;
-  z-index: 10;
+  z-index: 20;
+  white-space: nowrap;
 }
 .message:hover .message-actions {
   display: flex;
 }
-.message {
-  position: relative;
+.message:hover {
+  z-index: 5; /* lift above surrounding messages so actions aren't clipped */
 }
 .msg-action-btn {
   background: none;
@@ -1838,6 +1871,16 @@ html, body, #root {
 .msg-action-btn:hover {
   background: var(--bg-hover, #2a2a3e);
   color: var(--text-primary);
+}
+.msg-action-delete:hover {
+  color: #f87171;
+}
+
+/* ── Deleted message placeholder ───────────────────────────── */
+.message-deleted {
+  font-style: italic;
+  opacity: 0.55;
+  color: var(--text-secondary);
 }
 
 /* ── Reply bar (above input) ────────────────────────────────── */

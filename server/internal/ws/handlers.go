@@ -72,6 +72,8 @@ func handleMessage(c *Client, raw []byte) {
 		handleChatMessage(c, msg.Payload)
 	case "edit_message":
 		handleEditMessage(c, msg.Payload)
+	case "delete_message":
+		handleDeleteMessage(c, msg.Payload)
 	case "typing_start":
 		handleTyping(c, msg.Payload, true)
 	case "typing_stop":
@@ -188,6 +190,39 @@ func handleEditMessage(c *Client, payload json.RawMessage) {
 
 	broadcastMsg := WSMessage{
 		Type:    "message_edited",
+		Payload: json.RawMessage(mustMarshal(updated)),
+	}
+	data := mustMarshal(broadcastMsg)
+	c.hub.SendToChannel(existing.ChannelID, data, "")
+}
+
+type deleteMessagePayload struct {
+	MessageID string `json:"message_id"`
+}
+
+func handleDeleteMessage(c *Client, payload json.RawMessage) {
+	var p deleteMessagePayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return
+	}
+	if p.MessageID == "" {
+		return
+	}
+
+	// Verify ownership
+	existing, err := c.hub.db.GetMessage(p.MessageID)
+	if err != nil || existing.UserID != c.userID {
+		return
+	}
+
+	updated, err := c.hub.db.DeleteMessage(p.MessageID, c.userID)
+	if err != nil {
+		log.Printf("Failed to delete message: %v", err)
+		return
+	}
+
+	broadcastMsg := WSMessage{
+		Type:    "message_deleted",
 		Payload: json.RawMessage(mustMarshal(updated)),
 	}
 	data := mustMarshal(broadcastMsg)

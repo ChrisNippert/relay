@@ -85,6 +85,7 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		// Messages
 		r.Get("/api/channels/{channelID}/messages", GetMessagesHandler(database))
 		r.Put("/api/messages/{messageID}", EditMessageHandler(database))
+		r.Delete("/api/messages/{messageID}", DeleteMessageHandler(database))
 		r.Get("/api/messages/{messageID}/history", GetEditHistoryHandler(database))
 
 		// Voice state

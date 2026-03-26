@@ -12,6 +12,7 @@ type Message struct {
 	ReplyToID   *string       `json:"reply_to_id,omitempty"`
 	ReplyTo     *Message      `json:"reply_to,omitempty"`
 	Edited      bool          `json:"edited"`
+	Deleted     bool          `json:"deleted"`
 	CreatedAt   time.Time     `json:"created_at"`
 	UpdatedAt   time.Time     `json:"updated_at"`
 	Attachments []Attachment  `json:"attachments,omitempty"`

@@ -55,6 +55,7 @@ export interface Message {
   reply_to_id?: string
   reply_to?: Message
   edited: boolean
+  deleted?: boolean
   created_at: string
   updated_at: string
   attachments?: Attachment[]

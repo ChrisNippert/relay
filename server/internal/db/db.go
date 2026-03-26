@@ -39,6 +39,8 @@ func (db *DB) migrate() error {
 	alterations := []string{
 		`ALTER TABLE messages ADD COLUMN reply_to_id TEXT REFERENCES messages(id) ON DELETE SET NULL`,
 		`ALTER TABLE messages ADD COLUMN edited INTEGER DEFAULT 0`,
+		`ALTER TABLE messages ADD COLUMN deleted INTEGER DEFAULT 0`,
+		`CREATE TABLE IF NOT EXISTS message_edits (id TEXT PRIMARY KEY, message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, content TEXT NOT NULL, edited_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
 	}
 	for _, stmt := range alterations {
 		db.Exec(stmt) // intentionally ignore "duplicate column" errors
@@ -110,6 +112,7 @@ CREATE TABLE IF NOT EXISTS messages (
     type TEXT DEFAULT 'text',
     reply_to_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
     edited INTEGER DEFAULT 0,
+    deleted INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

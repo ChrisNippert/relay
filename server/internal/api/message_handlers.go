@@ -91,6 +91,32 @@ func EditMessageHandler(database *db.DB) http.HandlerFunc {
 	}
 }
 
+func DeleteMessageHandler(database *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		msgID := chi.URLParam(r, "messageID")
+		userID := GetUserID(r)
+
+		msg, err := database.GetMessage(msgID)
+		if err != nil {
+			http.Error(w, `{"error":"message not found"}`, http.StatusNotFound)
+			return
+		}
+		if msg.UserID != userID {
+			http.Error(w, `{"error":"not your message"}`, http.StatusForbidden)
+			return
+		}
+
+		updated, err := database.DeleteMessage(msgID, userID)
+		if err != nil {
+			http.Error(w, `{"error":"failed to delete"}`, http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(updated)
+	}
+}
+
 func GetEditHistoryHandler(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		msgID := chi.URLParam(r, "messageID")

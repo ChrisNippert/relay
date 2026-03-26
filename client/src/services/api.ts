@@ -102,6 +102,8 @@ export const getMessages = (channelId: string, limit = 50, offset = 0) =>
   request<Message[]>('GET', `/channels/${encodeURIComponent(channelId)}/messages?limit=${limit}&offset=${offset}`)
 export const editMessage = (messageId: string, content: string) =>
   request<Message>('PUT', `/messages/${encodeURIComponent(messageId)}`, { content })
+export const deleteMessage = (messageId: string) =>
+  request<Message>('DELETE', `/messages/${encodeURIComponent(messageId)}`)
 export const getEditHistory = (messageId: string) =>
   request<import('../types').MessageEdit[]>('GET', `/messages/${encodeURIComponent(messageId)}/history`)
 

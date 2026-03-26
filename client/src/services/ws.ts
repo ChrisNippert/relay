@@ -82,6 +82,10 @@ export function sendEditMessage(messageId: string, content: string) {
   send('edit_message', { message_id: messageId, content })
 }
 
+export function sendDeleteMessage(messageId: string) {
+  send('delete_message', { message_id: messageId })
+}
+
 export function sendTypingStart(channelId: string) {
   send('typing_start', { channel_id: channelId })
 }

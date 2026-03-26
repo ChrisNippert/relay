@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, type FormEvent, type ChangeEvent } from 'react'
 import type { Channel, Message, MessageEdit, User, ServerMember, WSMessage as WSMsg } from '../types'
 import * as api from '../services/api'
-import { sendChatMessage, sendTypingStart, sendTypingStop, sendEditMessage, subscribe } from '../services/ws'
+import { sendChatMessage, sendTypingStart, sendTypingStop, sendEditMessage, sendDeleteMessage, subscribe } from '../services/ws'
 import { useAuth } from '../context/AuthContext'
 
 interface Props {
@@ -165,6 +165,11 @@ export default function ChatView({ channel, onStartCall }: Props) {
         if (m.channel_id === channel.id) {
           setMessages((prev) => prev.map((x) => x.id === m.id ? { ...x, ...m } : x))
         }
+      } else if (msg.type === 'message_deleted') {
+        const m = msg.payload as Message
+        if (m.channel_id === channel.id) {
+          setMessages((prev) => prev.map((x) => x.id === m.id ? { ...x, ...m } : x))
+        }
       } else if (msg.type === 'typing_start') {
         const p = msg.payload as { channel_id: string; user_id: string }
         if (p.channel_id === channel.id && p.user_id !== user?.id) {
@@ -312,6 +317,10 @@ export default function ChatView({ channel, onStartCall }: Props) {
     // input pre-filled via useEffect
   }
 
+  const handleDelete = (m: Message) => {
+    sendDeleteMessage(m.id)
+  }
+
   const handleHistoryClick = async (m: Message) => {
     setHistoryMsg(m)
     try {
@@ -373,62 +382,77 @@ export default function ChatView({ channel, onStartCall }: Props) {
 
           return (
             <div key={m.id} className={`message ${m.user_id === user?.id ? 'own' : ''} ${isGrouped ? 'grouped' : ''}`}>
-              {m.reply_to && (
-                <div className="reply-preview">
-                  <span className="reply-preview-author">{m.reply_to.author?.display_name ?? m.reply_to.user_id}</span>
-                  <span className="reply-preview-content">{m.reply_to.content.slice(0, 80)}{m.reply_to.content.length > 80 ? '…' : ''}</span>
-                </div>
-              )}
-              {!isGrouped && (
-                <div className="message-header">
-                  <span className="message-author">{m.author?.display_name ?? m.user_id}</span>
-                  <span className="message-time">{formatTime(m.created_at)}</span>
-                </div>
-              )}
-              <div className="message-body">
-                {renderMessageContent(m.content)}
-                {m.edited && (
-                  <span className="edited-badge" onClick={() => handleHistoryClick(m)} title="View edit history">(edited)</span>
-                )}
-              </div>
-              {m.attachments && m.attachments.length > 0 && (
-                <div className="message-attachments">
-                  {m.attachments.map((a) => {
-                    const isImage = /^image\//i.test(a.mime_type)
-                    return isImage ? (
-                      <a key={a.id} href={api.fileURL(a.id)} target="_blank" rel="noreferrer">
-                        <img src={api.fileURL(a.id)} alt={a.filename} className="attachment-image" />
-                      </a>
-                    ) : (
-                      <a key={a.id} href={api.fileURL(a.id)} target="_blank" rel="noreferrer" className="attachment-link">
-                        📎 {a.filename} ({(a.file_size / 1024).toFixed(1)} KB)
-                      </a>
-                    )
-                  })}
-                </div>
-              )}
-              {embedImages.length > 0 && (
-                <div className="message-embeds">
-                  {embedImages.map((url, i) => (
-                    <a key={i} href={url} target="_blank" rel="noreferrer">
-                      <img src={url} alt="" className="embed-image" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                    </a>
-                  ))}
-                </div>
-              )}
-              {embedLinks.length > 0 && (
-                <div className="message-embeds">
-                  {embedLinks.map((url, i) => (
-                    <div key={i} className="link-embed">
-                      <a href={url} target="_blank" rel="noreferrer noopener" className="link-embed-url">{url}</a>
-                    </div>
-                  ))}
-                </div>
-              )}
               <div className="message-actions">
                 <button className="msg-action-btn" onClick={() => handleReply(m)} title="Reply">↩</button>
-                {m.user_id === user?.id && (
+                {(m.edited || m.deleted) && (
+                  <button className="msg-action-btn" onClick={() => handleHistoryClick(m)} title="View history">🕐</button>
+                )}
+                {m.user_id === user?.id && !m.deleted && (
                   <button className="msg-action-btn" onClick={() => handleEdit(m)} title="Edit">✏</button>
+                )}
+                {m.user_id === user?.id && !m.deleted && (
+                  <button className="msg-action-btn msg-action-delete" onClick={() => handleDelete(m)} title="Delete">🗑</button>
+                )}
+              </div>
+              <div className="message-gutter">
+                {isGrouped && <span className="message-gutter-time">{formatTime(m.created_at)}</span>}
+              </div>
+              <div className="message-content">
+                {m.reply_to && (
+                  <div className="reply-preview">
+                    <span className="reply-preview-author">{m.reply_to.author?.display_name ?? m.reply_to.user_id}</span>
+                    <span className="reply-preview-content">{m.reply_to.content.slice(0, 80)}{m.reply_to.content.length > 80 ? '…' : ''}</span>
+                  </div>
+                )}
+                {!isGrouped && (
+                  <div className="message-header">
+                    <span className="message-author">{m.author?.display_name ?? m.user_id}</span>
+                    <span className="message-time">{formatTime(m.created_at)}</span>
+                  </div>
+                )}
+                {m.deleted ? (
+                  <div className="message-body message-deleted">This message was deleted.</div>
+                ) : (
+                  <div className="message-body">
+                    {renderMessageContent(m.content)}
+                    {m.edited && (
+                      <span className="edited-badge" onClick={() => handleHistoryClick(m)} title="View edit history">(edited)</span>
+                    )}
+                  </div>
+                )}
+                {m.attachments && m.attachments.length > 0 && (
+                  <div className="message-attachments">
+                    {m.attachments.map((a) => {
+                      const isImage = /^image\//i.test(a.mime_type)
+                      return isImage ? (
+                        <a key={a.id} href={api.fileURL(a.id)} target="_blank" rel="noreferrer">
+                          <img src={api.fileURL(a.id)} alt={a.filename} className="attachment-image" />
+                        </a>
+                      ) : (
+                        <a key={a.id} href={api.fileURL(a.id)} target="_blank" rel="noreferrer" className="attachment-link">
+                          📎 {a.filename} ({(a.file_size / 1024).toFixed(1)} KB)
+                        </a>
+                      )
+                    })}
+                  </div>
+                )}
+                {embedImages.length > 0 && (
+                  <div className="message-embeds">
+                    {embedImages.map((url, i) => (
+                      <a key={i} href={url} target="_blank" rel="noreferrer">
+                        <img src={url} alt="" className="embed-image" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                      </a>
+                    ))}
+                  </div>
+                )}
+                {embedLinks.length > 0 && (
+                  <div className="message-embeds">
+                    {embedLinks.map((url, i) => (
+                      <div key={i} className="link-embed">
+                        <a href={url} target="_blank" rel="noreferrer noopener" className="link-embed-url">{url}</a>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             </div>
@@ -515,8 +539,8 @@ export default function ChatView({ channel, onStartCall }: Props) {
                 ))
               )}
               <div className="history-entry history-entry-current">
-                <div className="history-entry-time">Current</div>
-                <div className="history-entry-content">{historyMsg.content}</div>
+                <div className="history-entry-time">Current{historyMsg.deleted ? ' — deleted' : ''}</div>
+                <div className={`history-entry-content${historyMsg.deleted ? ' message-deleted' : ''}`}>{historyMsg.deleted ? 'This message was deleted.' : historyMsg.content}</div>
               </div>
             </div>
           </div>
