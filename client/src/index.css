@@ -1763,3 +1763,239 @@ html, body, #root {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ── Reply preview (inside message bubble) ─────────────────── */
+.reply-preview {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  margin-bottom: 2px;
+  border-left: 3px solid var(--accent, #7c3aed);
+  border-radius: 3px;
+  background: rgba(124, 58, 237, 0.08);
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  cursor: default;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.reply-preview-author {
+  font-weight: 600;
+  color: var(--accent, #7c3aed);
+  flex-shrink: 0;
+}
+.reply-preview-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── (edited) badge ─────────────────────────────────────────── */
+.edited-badge {
+  margin-left: 5px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  opacity: 0.7;
+}
+.edited-badge:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+/* ── Message hover action buttons ──────────────────────────── */
+.message-actions {
+  display: none;
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  gap: 2px;
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border, #3a3a5c);
+  border-radius: 6px;
+  padding: 2px 4px;
+  z-index: 10;
+}
+.message:hover .message-actions {
+  display: flex;
+}
+.message {
+  position: relative;
+}
+.msg-action-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 2px 5px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.msg-action-btn:hover {
+  background: var(--bg-hover, #2a2a3e);
+  color: var(--text-primary);
+}
+
+/* ── Reply bar (above input) ────────────────────────────────── */
+.reply-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  background: rgba(124, 58, 237, 0.1);
+  border-top: 1px solid var(--accent, #7c3aed);
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  gap: 8px;
+}
+.reply-bar-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.reply-bar-cancel,
+.edit-bar-cancel {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 0 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.reply-bar-cancel:hover,
+.edit-bar-cancel:hover {
+  color: var(--text-primary);
+}
+
+/* ── Edit bar (above input) ─────────────────────────────────── */
+.edit-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  background: rgba(234, 179, 8, 0.1);
+  border-top: 1px solid #ca8a04;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+.edit-bar-text {
+  font-weight: 500;
+}
+
+/* ── Input wrapper (holds dropdown + form) ──────────────────── */
+.input-wrapper {
+  position: relative;
+}
+
+/* ── @mention dropdown ──────────────────────────────────────── */
+.mention-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border, #3a3a5c);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 50;
+}
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+.mention-item:hover {
+  background: var(--bg-hover, #2a2a3e);
+}
+.mention-item-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.mention-item-handle {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+/* ── Edit history modal ─────────────────────────────────────── */
+.history-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+.history-modal {
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border, #3a3a5c);
+  border-radius: 10px;
+  width: min(480px, 92vw);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.history-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border, #3a3a5c);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.history-modal-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1.2rem;
+  padding: 0 4px;
+  line-height: 1;
+}
+.history-modal-close:hover {
+  color: var(--text-primary);
+}
+.history-modal-body {
+  overflow-y: auto;
+  padding: 8px 0;
+}
+.history-entry {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border, #3a3a5c);
+}
+.history-entry:last-child {
+  border-bottom: none;
+}
+.history-entry-current {
+  opacity: 0.65;
+  font-style: italic;
+}
+.history-entry-time {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-bottom: 3px;
+}
+.history-entry-content {
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+.history-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}

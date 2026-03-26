@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, type FormEvent, type ChangeEvent } from 'react'
-import type { Channel, Message, WSMessage as WSMsg } from '../types'
+import type { Channel, Message, MessageEdit, User, ServerMember, WSMessage as WSMsg } from '../types'
 import * as api from '../services/api'
-import { sendChatMessage, sendTypingStart, sendTypingStop, subscribe } from '../services/ws'
+import { sendChatMessage, sendTypingStart, sendTypingStop, sendEditMessage, subscribe } from '../services/ws'
 import { useAuth } from '../context/AuthContext'
 
 interface Props {
@@ -73,10 +73,17 @@ export default function ChatView({ channel, onStartCall }: Props) {
   const [uploading, setUploading] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [hasMore, setHasMore] = useState(true)
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null)
+  const [editingMsg, setEditingMsg] = useState<Message | null>(null)
+  const [historyMsg, setHistoryMsg] = useState<Message | null>(null)
+  const [editHistory, setEditHistory] = useState<MessageEdit[]>([])
+  const [mentionUsers, setMentionUsers] = useState<User[]>([])
+  const [members, setMembers] = useState<User[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const typingTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
   const initialLoadRef = useRef(true)
   const userNameCache = useRef<Map<string, string>>(new Map())
 
@@ -91,6 +98,27 @@ export default function ChatView({ channel, onStartCall }: Props) {
       setDmPartnerId(null)
     }
   }, [channel.id, channel.server_id, user?.id, onStartCall])
+
+  // Load channel members for @mention autocomplete
+  useEffect(() => {
+    if (channel.server_id) {
+      api.getMembers(channel.server_id).then((serverMembers: ServerMember[]) => {
+        Promise.all(
+          serverMembers.map((sm) => api.getUser(sm.user_id).catch(() => null))
+        ).then((users) => {
+          setMembers(users.filter((u): u is User => u !== null && u.id !== user?.id))
+        })
+      }).catch(() => setMembers([]))
+    } else {
+      api.getDMParticipants(channel.id).then((ids: string[]) => {
+        Promise.all(
+          ids.filter((id) => id !== user?.id).map((id) => api.getUser(id).catch(() => null))
+        ).then((users) => {
+          setMembers(users.filter((u): u is User => u !== null))
+        })
+      }).catch(() => setMembers([]))
+    }
+  }, [channel.id, channel.server_id, user?.id])
 
   // Helper to resolve user ID to display name
   const resolveUserName = useCallback(async (userId: string): Promise<string> => {
@@ -110,6 +138,8 @@ export default function ChatView({ channel, onStartCall }: Props) {
   useEffect(() => {
     setMessages([])
     setHasMore(true)
+    setReplyingTo(null)
+    setEditingMsg(null)
     initialLoadRef.current = true
     api.getMessages(channel.id).then((msgs) => {
       setMessages(msgs.reverse()) // API returns DESC, we want ASC
@@ -129,6 +159,11 @@ export default function ChatView({ channel, onStartCall }: Props) {
             next.delete(m.user_id)
             return next
           })
+        }
+      } else if (msg.type === 'message_edited') {
+        const m = msg.payload as Message
+        if (m.channel_id === channel.id) {
+          setMessages((prev) => prev.map((x) => x.id === m.id ? { ...x, ...m } : x))
         }
       } else if (msg.type === 'typing_start') {
         const p = msg.payload as { channel_id: string; user_id: string }
@@ -191,6 +226,18 @@ export default function ChatView({ channel, onStartCall }: Props) {
 
   const handleInput = (value: string) => {
     setInput(value)
+    // Detect @mention — look for @ followed by word chars at end of input
+    const mentionMatch = value.match(/@(\w*)$/)
+    if (mentionMatch) {
+      const query = (mentionMatch[1] ?? '').toLowerCase()
+      const filtered = members.filter((u) =>
+        u.username.toLowerCase().includes(query) ||
+        u.display_name.toLowerCase().includes(query)
+      )
+      setMentionUsers(filtered.slice(0, 8))
+    } else {
+      setMentionUsers([])
+    }
     if (value) {
       sendTypingStart(channel.id)
       clearTimeout(typingTimerRef.current)
@@ -201,10 +248,27 @@ export default function ChatView({ channel, onStartCall }: Props) {
     }
   }
 
+  const insertMention = (u: User) => {
+    const newInput = input.replace(/@(\w*)$/, `@${u.username} `)
+    setInput(newInput)
+    setMentionUsers([])
+    inputRef.current?.focus()
+  }
+
   const handleSend = async (e: FormEvent) => {
     e.preventDefault()
     const text = input.trim()
     if (!text && pendingFiles.length === 0) return
+
+    // Edit mode: send edit instead of new message
+    if (editingMsg) {
+      if (text) sendEditMessage(editingMsg.id, text)
+      setEditingMsg(null)
+      setInput('')
+      sendTypingStop(channel.id)
+      clearTimeout(typingTimerRef.current)
+      return
+    }
 
     let attachmentIds: string[] = []
     if (pendingFiles.length > 0) {
@@ -221,10 +285,41 @@ export default function ChatView({ channel, onStartCall }: Props) {
       setPendingFiles([])
     }
 
-    sendChatMessage(channel.id, text || ' ', undefined, attachmentIds.length ? attachmentIds : undefined)
+    sendChatMessage(channel.id, text || ' ', undefined, attachmentIds.length ? attachmentIds : undefined, replyingTo?.id)
+    setReplyingTo(null)
     setInput('')
     sendTypingStop(channel.id)
     clearTimeout(typingTimerRef.current)
+  }
+
+  // Pre-fill input when entering edit mode
+  useEffect(() => {
+    if (editingMsg) {
+      setInput(editingMsg.content)
+      inputRef.current?.focus()
+    }
+  }, [editingMsg])
+
+  const handleReply = (m: Message) => {
+    setEditingMsg(null)
+    setReplyingTo(m)
+    inputRef.current?.focus()
+  }
+
+  const handleEdit = (m: Message) => {
+    setReplyingTo(null)
+    setEditingMsg(m)
+    // input pre-filled via useEffect
+  }
+
+  const handleHistoryClick = async (m: Message) => {
+    setHistoryMsg(m)
+    try {
+      const hist = await api.getEditHistory(m.id)
+      setEditHistory(hist)
+    } catch {
+      setEditHistory([])
+    }
   }
 
   const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
@@ -241,6 +336,11 @@ export default function ChatView({ channel, onStartCall }: Props) {
   const formatTime = (iso: string) => {
     const d = new Date(iso)
     return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  }
+
+  const formatDateTime = (iso: string) => {
+    const d = new Date(iso)
+    return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })
   }
 
   return (
@@ -273,13 +373,24 @@ export default function ChatView({ channel, onStartCall }: Props) {
 
           return (
             <div key={m.id} className={`message ${m.user_id === user?.id ? 'own' : ''} ${isGrouped ? 'grouped' : ''}`}>
+              {m.reply_to && (
+                <div className="reply-preview">
+                  <span className="reply-preview-author">{m.reply_to.author?.display_name ?? m.reply_to.user_id}</span>
+                  <span className="reply-preview-content">{m.reply_to.content.slice(0, 80)}{m.reply_to.content.length > 80 ? '…' : ''}</span>
+                </div>
+              )}
               {!isGrouped && (
                 <div className="message-header">
                   <span className="message-author">{m.author?.display_name ?? m.user_id}</span>
                   <span className="message-time">{formatTime(m.created_at)}</span>
                 </div>
               )}
-              <div className="message-body">{renderMessageContent(m.content)}</div>
+              <div className="message-body">
+                {renderMessageContent(m.content)}
+                {m.edited && (
+                  <span className="edited-badge" onClick={() => handleHistoryClick(m)} title="View edit history">(edited)</span>
+                )}
+              </div>
               {m.attachments && m.attachments.length > 0 && (
                 <div className="message-attachments">
                   {m.attachments.map((a) => {
@@ -314,6 +425,12 @@ export default function ChatView({ channel, onStartCall }: Props) {
                   ))}
                 </div>
               )}
+              <div className="message-actions">
+                <button className="msg-action-btn" onClick={() => handleReply(m)} title="Reply">↩</button>
+                {m.user_id === user?.id && (
+                  <button className="msg-action-btn" onClick={() => handleEdit(m)} title="Edit">✏</button>
+                )}
+              </div>
             </div>
           )
         })}
@@ -323,6 +440,20 @@ export default function ChatView({ channel, onStartCall }: Props) {
       {typingUsers.size > 0 && (
         <div className="typing-indicator">
           {Array.from(typingUsers.values()).join(', ')} typing...
+        </div>
+      )}
+
+      {replyingTo && (
+        <div className="reply-bar">
+          <span className="reply-bar-text">↩ Replying to <strong>{replyingTo.author?.display_name ?? replyingTo.user_id}</strong>: {replyingTo.content.slice(0, 60)}{replyingTo.content.length > 60 ? '…' : ''}</span>
+          <button className="reply-bar-cancel" onClick={() => setReplyingTo(null)}>×</button>
+        </div>
+      )}
+
+      {editingMsg && (
+        <div className="edit-bar">
+          <span className="edit-bar-text">✏ Editing message</span>
+          <button className="edit-bar-cancel" onClick={() => { setEditingMsg(null); setInput('') }}>×</button>
         </div>
       )}
 
@@ -337,20 +468,60 @@ export default function ChatView({ channel, onStartCall }: Props) {
         </div>
       )}
 
-      <form className="message-input" onSubmit={handleSend}>
-        <input type="file" ref={fileInputRef} onChange={handleFileSelect} multiple hidden />
-        <button type="button" className="upload-btn" onClick={() => fileInputRef.current?.click()} title="Upload file">
-          📎
-        </button>
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => handleInput(e.target.value)}
-          placeholder={`Message ${channel.server_id ? '#' + channel.name : channel.name}`}
-          autoFocus
-        />
-        <button type="submit" disabled={uploading}>{uploading ? '...' : 'Send'}</button>
-      </form>
+      <div className="input-wrapper">
+        {mentionUsers.length > 0 && (
+          <div className="mention-dropdown">
+            {mentionUsers.map((u) => (
+              <div key={u.id} className="mention-item" onMouseDown={(e) => { e.preventDefault(); insertMention(u) }}>
+                <span className="mention-item-name">{u.display_name}</span>
+                <span className="mention-item-handle">@{u.username}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <form className="message-input" onSubmit={handleSend}>
+          <input type="file" ref={fileInputRef} onChange={handleFileSelect} multiple hidden />
+          <button type="button" className="upload-btn" onClick={() => fileInputRef.current?.click()} title="Upload file">
+            📎
+          </button>
+          <input
+            ref={inputRef}
+            type="text"
+            value={input}
+            onChange={(e) => handleInput(e.target.value)}
+            placeholder={editingMsg ? 'Edit message…' : `Message ${channel.server_id ? '#' + channel.name : channel.name}`}
+            autoFocus
+          />
+          <button type="submit" disabled={uploading}>{uploading ? '...' : editingMsg ? 'Save' : 'Send'}</button>
+        </form>
+      </div>
+
+      {historyMsg && (
+        <div className="history-modal-backdrop" onClick={() => setHistoryMsg(null)}>
+          <div className="history-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="history-modal-header">
+              <span>Edit history</span>
+              <button className="history-modal-close" onClick={() => setHistoryMsg(null)}>×</button>
+            </div>
+            <div className="history-modal-body">
+              {editHistory.length === 0 ? (
+                <div className="history-empty">No edit history available.</div>
+              ) : (
+                editHistory.map((h) => (
+                  <div key={h.id} className="history-entry">
+                    <div className="history-entry-time">{formatDateTime(h.edited_at)}</div>
+                    <div className="history-entry-content">{h.content}</div>
+                  </div>
+                ))
+              )}
+              <div className="history-entry history-entry-current">
+                <div className="history-entry-time">Current</div>
+                <div className="history-entry-content">{historyMsg.content}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
