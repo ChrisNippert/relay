@@ -8,6 +8,8 @@ export interface User {
   public_key?: string
   avatar_url?: string
   status: string
+  custom_status: string
+  name_color: string
   created_at: string
   updated_at: string
 }

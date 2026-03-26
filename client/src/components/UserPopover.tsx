@@ -113,13 +113,26 @@ export default function UserPopover({ userId, anchorRect, onClose, onMessage }: 
               ) : (
                 <span className="user-popover-avatar-fallback">{userInfo.display_name[0]?.toUpperCase()}</span>
               )}
+              <span className={`user-popover-status-dot ${userInfo.status === 'online' ? 'online' : 'offline'}`} />
             </span>
             <div className="user-popover-names">
-              <span className="user-popover-display">{userInfo.display_name}</span>
+              <span
+                className="user-popover-display"
+                style={userInfo.name_color ? { color: userInfo.name_color } : undefined}
+              >
+                {userInfo.display_name}
+              </span>
               <span className="user-popover-username">@{userInfo.username}</span>
             </div>
           </div>
+          {userInfo.custom_status && (
+            <div className="user-popover-custom-status">{userInfo.custom_status}</div>
+          )}
           <div className="user-popover-meta">
+            <span className={`user-popover-online-label ${userInfo.status === 'online' ? 'online' : 'offline'}`}>
+              {userInfo.status === 'online' ? '● Online' : '○ Offline'}
+            </span>
+            <span className="user-popover-meta-sep">·</span>
             Joined {new Date(userInfo.created_at).toLocaleDateString()}
           </div>
           {!isSelf && (

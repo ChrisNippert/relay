@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/relay-chat/relay/internal/db"
+	"github.com/relay-chat/relay/internal/ws"
 )
 
 func GetMeHandler(database *db.DB) http.HandlerFunc {
@@ -22,8 +23,10 @@ func GetMeHandler(database *db.DB) http.HandlerFunc {
 }
 
 type updateUserRequest struct {
-	DisplayName string `json:"display_name"`
-	AvatarURL   string `json:"avatar_url"`
+	DisplayName  string `json:"display_name"`
+	AvatarURL    string `json:"avatar_url"`
+	CustomStatus string `json:"custom_status"`
+	NameColor    string `json:"name_color"`
 }
 
 func UpdateMeHandler(database *db.DB) http.HandlerFunc {
@@ -34,7 +37,7 @@ func UpdateMeHandler(database *db.DB) http.HandlerFunc {
 			return
 		}
 
-		user, err := database.UpdateUser(GetUserID(r), req.DisplayName, req.AvatarURL)
+		user, err := database.UpdateUser(GetUserID(r), req.DisplayName, req.AvatarURL, req.CustomStatus, req.NameColor)
 		if err != nil {
 			http.Error(w, `{"error":"failed to update user"}`, http.StatusInternalServerError)
 			return
@@ -101,5 +104,32 @@ func SearchUsersHandler(database *db.DB) http.HandlerFunc {
 			return
 		}
 		json.NewEncoder(w).Encode(users)
+	}
+}
+
+// GetOnlineUsersHandler returns the list of online user IDs for a server.
+func GetOnlineUsersHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		serverID := chi.URLParam(r, "serverID")
+		members, err := database.GetServerMembers(serverID)
+		if err != nil {
+			http.Error(w, `{"error":"failed to get members"}`, http.StatusInternalServerError)
+			return
+		}
+
+		onlineMap := hub.GetOnlineUserIDs()
+		var onlineIDs []string
+		for _, m := range members {
+			if onlineMap[m.UserID] {
+				onlineIDs = append(onlineIDs, m.UserID)
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if onlineIDs == nil {
+			w.Write([]byte("[]"))
+			return
+		}
+		json.NewEncoder(w).Encode(onlineIDs)
 	}
 }

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { Server } from '../types'
 
 interface Props {
@@ -5,14 +6,32 @@ interface Props {
   selected: Server | null
   onSelect: (server: Server) => void
   onDMs: () => void
-  onCreate: () => void
+  onCreate: (name: string) => void
   isDMView: boolean
-  joinCode: string
-  onJoinCodeChange: (code: string) => void
-  onJoinByCode: () => void
+  onJoinByCode: (code: string) => void
 }
 
-export default function ServerList({ servers, selected, onSelect, onDMs, onCreate, isDMView, joinCode, onJoinCodeChange, onJoinByCode }: Props) {
+export default function ServerList({ servers, selected, onSelect, onDMs, onCreate, isDMView, onJoinByCode }: Props) {
+  const [showModal, setShowModal] = useState<'create' | 'join' | null>(null)
+  const [serverName, setServerName] = useState('')
+  const [joinCode, setJoinCode] = useState('')
+
+  const handleCreate = () => {
+    const name = serverName.trim()
+    if (!name) return
+    onCreate(name)
+    setServerName('')
+    setShowModal(null)
+  }
+
+  const handleJoin = () => {
+    const code = joinCode.trim()
+    if (!code) return
+    onJoinByCode(code)
+    setJoinCode('')
+    setShowModal(null)
+  }
+
   return (
     <div className="server-list">
       <button
@@ -32,29 +51,88 @@ export default function ServerList({ servers, selected, onSelect, onDMs, onCreat
           onClick={() => onSelect(s)}
           title={s.name}
         >
-          {s.name.charAt(0).toUpperCase()}
+          {s.icon_url ? (
+            <img src={s.icon_url} alt="" className="server-icon-img" />
+          ) : (
+            s.name.charAt(0).toUpperCase()
+          )}
         </button>
       ))}
 
-      <button className="server-icon add" onClick={onCreate} title="Create Server">
+      <button className="server-icon add" onClick={() => setShowModal('create')} title="Create or Join Server">
         +
       </button>
 
-      <div className="server-divider" />
+      {showModal && (
+        <div className="server-modal-overlay" onClick={() => setShowModal(null)}>
+          <div className="server-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="server-modal-header">
+              <h3>{showModal === 'create' ? 'Create a Server' : 'Join a Server'}</h3>
+              <button className="close-btn" onClick={() => setShowModal(null)}>×</button>
+            </div>
 
-      <div className="join-code-input">
-        <input
-          type="text"
-          value={joinCode}
-          onChange={(e) => onJoinCodeChange(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && onJoinByCode()}
-          placeholder="Code"
-          title="Enter invite code to join a server"
-        />
-        <button className="server-icon join" onClick={onJoinByCode} title="Join Server">
-          →
-        </button>
-      </div>
+            <div className="server-modal-tabs">
+              <button
+                className={`server-modal-tab ${showModal === 'create' ? 'active' : ''}`}
+                onClick={() => setShowModal('create')}
+              >
+                Create
+              </button>
+              <button
+                className={`server-modal-tab ${showModal === 'join' ? 'active' : ''}`}
+                onClick={() => setShowModal('join')}
+              >
+                Join
+              </button>
+            </div>
+
+            {showModal === 'create' ? (
+              <div className="server-modal-body">
+                <label className="server-modal-label">Server Name</label>
+                <input
+                  type="text"
+                  className="server-modal-input"
+                  value={serverName}
+                  onChange={(e) => setServerName(e.target.value)}
+                  placeholder="My Awesome Server"
+                  autoFocus
+                  maxLength={64}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+                />
+                <p className="server-modal-hint">Give your server a personality with a name. You can always change it later.</p>
+                <button
+                  className="server-modal-submit"
+                  onClick={handleCreate}
+                  disabled={!serverName.trim()}
+                >
+                  Create Server
+                </button>
+              </div>
+            ) : (
+              <div className="server-modal-body">
+                <label className="server-modal-label">Invite Code</label>
+                <input
+                  type="text"
+                  className="server-modal-input"
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value)}
+                  placeholder="Enter invite code"
+                  autoFocus
+                  onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
+                />
+                <p className="server-modal-hint">Enter an invite code to join an existing server.</p>
+                <button
+                  className="server-modal-submit"
+                  onClick={handleJoin}
+                  disabled={!joinCode.trim()}
+                >
+                  Join Server
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

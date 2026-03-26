@@ -27,7 +27,6 @@ export default function Home() {
   const selectedChannelRef = useRef<Channel | null>(null)
   const [showInvitePanel, setShowInvitePanel] = useState(false)
   const [invites, setInvites] = useState<ServerInvite[]>([])
-  const [joinCode, setJoinCode] = useState('')
   const [showSettings, setShowSettings] = useState(false)
   const [showServerSettings, setShowServerSettings] = useState(false)
   const [dmCall, setDmCall] = useState<{ userId: string; name: string; channelId: string; video: boolean } | null>(null)
@@ -221,12 +220,14 @@ export default function Home() {
     }
   }
 
-  const handleCreateServer = async () => {
-    const name = prompt('Server name:')
-    if (!name) return
-    const server = await api.createServer(name)
-    setServers((prev) => [...prev, server])
-    handleSelectServer(server)
+  const handleCreateServer = async (name: string) => {
+    try {
+      const server = await api.createServer(name)
+      setServers((prev) => [...prev, server])
+      handleSelectServer(server)
+    } catch (e) {
+      console.error('Failed to create server:', e)
+    }
   }
 
   const handleServerUpdated = (updated: Server) => {
@@ -331,14 +332,12 @@ export default function Home() {
     }
   }
 
-  const handleJoinByCode = async () => {
-    const code = joinCode.trim()
+  const handleJoinByCode = async (code: string) => {
     if (!code) return
     try {
       const server = await api.joinByInvite(code)
       setServers((prev) => prev.some((s) => s.id === server.id) ? prev : [...prev, server])
       handleSelectServer(server)
-      setJoinCode('')
     } catch (e) {
       alert('Invalid or expired invite code')
     }
@@ -360,8 +359,6 @@ export default function Home() {
         onDMs={handleSelectDMs}
         onCreate={handleCreateServer}
         isDMView={view === 'dm'}
-        joinCode={joinCode}
-        onJoinCodeChange={setJoinCode}
         onJoinByCode={handleJoinByCode}
       />
 

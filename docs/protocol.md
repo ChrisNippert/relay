@@ -367,7 +367,7 @@ A bare-bones text client needs only 4 steps:
 # Login
 TOKEN=$(curl -sk -X POST https://localhost:8080/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"alice@example.com","password":"secret"}' | jq -r .token)
+  -d '{"email":"user@user.com","password":"password"}' | jq -r .token)
 
 # Find a channel
 SERVER=$(curl -sk -H "Authorization: Bearer $TOKEN" https://localhost:8080/api/servers | jq -r '.[0].id')

@@ -68,7 +68,7 @@ export const login = (email: string, password: string) =>
 
 // Users
 export const getMe = () => request<User>('GET', '/users/me')
-export const updateMe = (data: Partial<Pick<User, 'display_name' | 'avatar_url'>>) =>
+export const updateMe = (data: Partial<Pick<User, 'display_name' | 'avatar_url' | 'custom_status' | 'name_color'>>) =>
   request<User>('PUT', '/users/me', data)
 export const getUser = (id: string) => request<User>('GET', `/users/${encodeURIComponent(id)}`)
 export const searchUsers = (q: string) => request<User[]>('GET', `/users/search?q=${encodeURIComponent(q)}`)
@@ -94,6 +94,7 @@ export const deleteServer = (id: string) => request<void>('DELETE', `/servers/${
 export const joinServer = (id: string) => request<void>('POST', `/servers/${encodeURIComponent(id)}/join`)
 export const leaveServer = (id: string) => request<void>('POST', `/servers/${encodeURIComponent(id)}/leave`)
 export const getMembers = (id: string) => request<ServerMember[]>('GET', `/servers/${encodeURIComponent(id)}/members`)
+export const getOnlineUsers = (id: string) => request<string[]>('GET', `/servers/${encodeURIComponent(id)}/online`)
 export const updateMemberRole = (serverId: string, userId: string, role: string) =>
   request<{ role: string }>('PUT', `/servers/${encodeURIComponent(serverId)}/members/${encodeURIComponent(userId)}/role`, { role })
 

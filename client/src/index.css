@@ -2635,3 +2635,354 @@ html, body, #root {
   border-left: 3px solid var(--accent);
   background: rgba(233, 69, 96, 0.07);
 }
+
+/* ============================================
+   Member Status Dots (online/offline)
+   ============================================ */
+.member-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.member-status-dot.online {
+  background: var(--success);
+  box-shadow: 0 0 4px rgba(78, 205, 196, 0.5);
+}
+
+.member-status-dot.offline {
+  background: var(--text-muted);
+}
+
+.member-item.offline .member-name {
+  opacity: 0.5;
+}
+
+/* ============================================
+   User Popover Enhancements
+   ============================================ */
+.user-popover-avatar {
+  position: relative;
+}
+
+.user-popover-status-dot {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 3px solid var(--bg-secondary);
+}
+
+.user-popover-status-dot.online {
+  background: var(--success);
+}
+
+.user-popover-status-dot.offline {
+  background: var(--text-muted);
+}
+
+.user-popover-custom-status {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  padding: 6px 0;
+  font-style: italic;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 4px;
+}
+
+.user-popover-online-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.user-popover-online-label.online {
+  color: var(--success);
+}
+
+.user-popover-online-label.offline {
+  color: var(--text-muted);
+}
+
+.user-popover-meta-sep {
+  margin: 0 4px;
+  color: var(--text-muted);
+}
+
+/* ============================================
+   Settings Tabs
+   ============================================ */
+.settings-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-tab {
+  flex: 1;
+  padding: 10px 16px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.settings-tab:hover {
+  color: var(--text-primary);
+}
+
+.settings-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.settings-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+}
+
+.settings-input:focus {
+  border-color: var(--accent);
+}
+
+.settings-save-btn {
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px;
+  font-size: 0.95rem;
+}
+
+/* ============================================
+   Color Picker
+   ============================================ */
+.color-picker-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.color-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.color-preset {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  color: white;
+  transition: transform 0.15s, border-color 0.15s;
+}
+
+.color-preset:hover {
+  transform: scale(1.15);
+}
+
+.color-preset.selected {
+  border-color: white;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.color-custom-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.color-picker-input {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  background: none;
+  padding: 0;
+}
+
+.color-picker-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.color-picker-input::-webkit-color-swatch {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.color-preview-text {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+/* ============================================
+   Server Create/Join Modal
+   ============================================ */
+.server-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  animation: fadeIn 0.15s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.server-modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 440px;
+  padding: 0;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  animation: modalSlideIn 0.2s ease-out;
+}
+
+@keyframes modalSlideIn {
+  from { opacity: 0; transform: translateY(-12px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.server-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 24px 0;
+}
+
+.server-modal-header h3 {
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.server-modal-header .close-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+
+.server-modal-tabs {
+  display: flex;
+  margin: 16px 24px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.server-modal-tab {
+  flex: 1;
+  padding: 10px 16px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.server-modal-tab:hover {
+  color: var(--text-primary);
+}
+
+.server-modal-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.server-modal-body {
+  padding: 20px 24px 24px;
+}
+
+.server-modal-label {
+  display: block;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.server-modal-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 1rem;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+
+.server-modal-input:focus {
+  border-color: var(--accent);
+}
+
+.server-modal-hint {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+.server-modal-submit {
+  width: 100%;
+  padding: 10px;
+  border-radius: 6px;
+  border: none;
+  background: var(--accent);
+  color: white;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 16px;
+  transition: background 0.2s;
+}
+
+.server-modal-submit:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.server-modal-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Server icon image */
+.server-icon-img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}

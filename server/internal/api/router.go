@@ -68,6 +68,7 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		r.Post("/api/servers/{serverID}/join", JoinServerHandler(database))
 		r.Post("/api/servers/{serverID}/leave", LeaveServerHandler(database))
 		r.Get("/api/servers/{serverID}/members", GetMembersHandler(database))
+		r.Get("/api/servers/{serverID}/online", GetOnlineUsersHandler(database, hub))
 		r.Put("/api/servers/{serverID}/members/{userID}/role", UpdateMemberRoleHandler(database, hub))
 
 		// Server invites

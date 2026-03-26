@@ -661,7 +661,10 @@ export default function ChatView({ channel, onStartCall, onDMUser }: Props) {
                 })()}
                 {!isGrouped && (
                   <div className="message-header">
-                    <span className="message-author clickable" onClick={(e) => {
+                    <span
+                      className="message-author clickable"
+                      style={m.author?.name_color ? { color: m.author.name_color } : undefined}
+                      onClick={(e) => {
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
                       setPopover({ userId: m.user_id, rect })
                     }}>{m.author?.display_name ?? m.user_id}</span>

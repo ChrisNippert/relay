@@ -20,10 +20,10 @@ func (db *DB) CreateUser(id, username, email, passwordHash, displayName string) 
 func (db *DB) GetUserByID(id string) (*models.User, error) {
 	user := &models.User{}
 	err := db.QueryRow(
-		`SELECT id, username, email, password_hash, display_name, public_key, avatar_url, status, created_at, updated_at FROM users WHERE id = ?`,
+		`SELECT id, username, email, password_hash, display_name, public_key, avatar_url, status, custom_status, name_color, created_at, updated_at FROM users WHERE id = ?`,
 		id,
 	).Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.DisplayName,
-		&user.PublicKey, &user.AvatarURL, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+		&user.PublicKey, &user.AvatarURL, &user.Status, &user.CustomStatus, &user.NameColor, &user.CreatedAt, &user.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -33,20 +33,20 @@ func (db *DB) GetUserByID(id string) (*models.User, error) {
 func (db *DB) GetUserByEmail(email string) (*models.User, error) {
 	user := &models.User{}
 	err := db.QueryRow(
-		`SELECT id, username, email, password_hash, display_name, public_key, avatar_url, status, created_at, updated_at FROM users WHERE email = ?`,
+		`SELECT id, username, email, password_hash, display_name, public_key, avatar_url, status, custom_status, name_color, created_at, updated_at FROM users WHERE email = ?`,
 		email,
 	).Scan(&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.DisplayName,
-		&user.PublicKey, &user.AvatarURL, &user.Status, &user.CreatedAt, &user.UpdatedAt)
+		&user.PublicKey, &user.AvatarURL, &user.Status, &user.CustomStatus, &user.NameColor, &user.CreatedAt, &user.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, ErrNotFound
 	}
 	return user, err
 }
 
-func (db *DB) UpdateUser(id, displayName, avatarURL string) (*models.User, error) {
+func (db *DB) UpdateUser(id, displayName, avatarURL, customStatus, nameColor string) (*models.User, error) {
 	_, err := db.Exec(
-		`UPDATE users SET display_name = ?, avatar_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-		displayName, avatarURL, id,
+		`UPDATE users SET display_name = ?, avatar_url = ?, custom_status = ?, name_color = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		displayName, avatarURL, customStatus, nameColor, id,
 	)
 	if err != nil {
 		return nil, err
@@ -72,7 +72,7 @@ func (db *DB) UpdateUserStatus(id, status string) error {
 
 func (db *DB) SearchUsers(query string) ([]models.User, error) {
 	rows, err := db.Query(
-		`SELECT id, username, display_name, avatar_url, status FROM users WHERE username LIKE ? OR display_name LIKE ? LIMIT 20`,
+		`SELECT id, username, display_name, avatar_url, status, custom_status, name_color FROM users WHERE username LIKE ? OR display_name LIKE ? LIMIT 20`,
 		"%"+query+"%", "%"+query+"%",
 	)
 	if err != nil {
@@ -83,7 +83,7 @@ func (db *DB) SearchUsers(query string) ([]models.User, error) {
 	var users []models.User
 	for rows.Next() {
 		var u models.User
-		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.AvatarURL, &u.Status); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.DisplayName, &u.AvatarURL, &u.Status, &u.CustomStatus, &u.NameColor); err != nil {
 			return nil, err
 		}
 		users = append(users, u)

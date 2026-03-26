@@ -107,7 +107,6 @@ func (h *Hub) SendToUser(userID string, data []byte) {
 	}
 }
 
-
 // SendToServer sends a message to all connected members of a server.
 func (h *Hub) SendToServer(serverID string, data []byte) {
 	members, err := h.db.GetServerMembers(serverID)
@@ -127,6 +126,7 @@ func (h *Hub) SendToServer(serverID string, data []byte) {
 		}
 	}
 }
+
 // SendToChannel sends a message to all connected users with access to a channel.
 func (h *Hub) SendToChannel(channelID string, data []byte, excludeUserID string) {
 	channel, err := h.db.GetChannel(channelID)
@@ -226,4 +226,22 @@ func mustMarshal(v interface{}) []byte {
 		return []byte("{}")
 	}
 	return data
+}
+
+// IsUserOnline returns whether a user has any active connections.
+func (h *Hub) IsUserOnline(userID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.clients[userID]) > 0
+}
+
+// GetOnlineUserIDs returns the set of currently connected user IDs.
+func (h *Hub) GetOnlineUserIDs() map[string]bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	online := make(map[string]bool, len(h.clients))
+	for uid := range h.clients {
+		online[uid] = true
+	}
+	return online
 }

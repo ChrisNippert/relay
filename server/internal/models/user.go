@@ -11,6 +11,8 @@ type User struct {
 	PublicKey    string    `json:"public_key,omitempty"`
 	AvatarURL    string    `json:"avatar_url,omitempty"`
 	Status       string    `json:"status"`
+	CustomStatus string    `json:"custom_status"`
+	NameColor    string    `json:"name_color"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

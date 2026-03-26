@@ -49,15 +49,15 @@ func (db *DB) GetMessage(id string) (*models.Message, error) {
 func (db *DB) getMessageShallow(id string) (*models.Message, error) {
 	m := &models.Message{}
 	var replyToID sql.NullString
-	var username, displayName, avatarURL string
+	var username, displayName, avatarURL, nameColor string
 	err := db.QueryRow(
 		`SELECT m.id, m.channel_id, m.user_id, m.content, m.type, m.reply_to_id, m.edited, m.created_at,
-		        u.username, u.display_name, u.avatar_url
+		        u.username, u.display_name, u.avatar_url, u.name_color
 		 FROM messages m
 		 JOIN users u ON m.user_id = u.id
 		 WHERE m.id = ?`, id,
 	).Scan(&m.ID, &m.ChannelID, &m.UserID, &m.Content, &m.Type, &replyToID, &m.Edited, &m.Deleted, &m.CreatedAt,
-		&username, &displayName, &avatarURL)
+		&username, &displayName, &avatarURL, &nameColor)
 	if err != nil {
 		return nil, err
 	}
@@ -69,6 +69,7 @@ func (db *DB) getMessageShallow(id string) (*models.Message, error) {
 		Username:    username,
 		DisplayName: displayName,
 		AvatarURL:   avatarURL,
+		NameColor:   nameColor,
 	}
 	return m, nil
 }
@@ -120,7 +121,7 @@ func (db *DB) GetMessageEditHistory(messageID string) ([]models.MessageEdit, err
 func (db *DB) GetMessages(channelID string, limit, offset int) ([]models.Message, error) {
 	rows, err := db.Query(
 		`SELECT m.id, m.channel_id, m.user_id, m.content, m.nonce, m.type, m.reply_to_id, m.edited, m.deleted, m.created_at, m.updated_at,
-		        u.username, u.display_name, u.avatar_url
+		        u.username, u.display_name, u.avatar_url, u.name_color
 		 FROM messages m
 		 JOIN users u ON m.user_id = u.id
 		 WHERE m.channel_id = ?
@@ -136,10 +137,10 @@ func (db *DB) GetMessages(channelID string, limit, offset int) ([]models.Message
 	var messages []models.Message
 	for rows.Next() {
 		var m models.Message
-		var username, displayName, avatarURL string
+		var username, displayName, avatarURL, nameColor string
 		var replyToID sql.NullString
 		if err := rows.Scan(&m.ID, &m.ChannelID, &m.UserID, &m.Content, &m.Nonce, &m.Type,
-			&replyToID, &m.Edited, &m.Deleted, &m.CreatedAt, &m.UpdatedAt, &username, &displayName, &avatarURL); err != nil {
+			&replyToID, &m.Edited, &m.Deleted, &m.CreatedAt, &m.UpdatedAt, &username, &displayName, &avatarURL, &nameColor); err != nil {
 			return nil, err
 		}
 		if replyToID.Valid {
@@ -150,6 +151,7 @@ func (db *DB) GetMessages(channelID string, limit, offset int) ([]models.Message
 			Username:    username,
 			DisplayName: displayName,
 			AvatarURL:   avatarURL,
+			NameColor:   nameColor,
 		}
 		attachments, _ := db.GetMessageAttachments(m.ID)
 		if attachments != nil {
@@ -173,18 +175,18 @@ func (db *DB) DeleteMessage(id, requestingUserID string) (*models.Message, error
 	// Save current content as history entry so it shows in the history view
 	editID := uuid.New().String()
 	_, err := db.Exec(
-`INSERT INTO message_edits (id, message_id, content, edited_at)
+		`INSERT INTO message_edits (id, message_id, content, edited_at)
                  SELECT ?, ?, content, CURRENT_TIMESTAMP FROM messages WHERE id = ?`,
-editID, id, id,
-)
+		editID, id, id,
+	)
 	if err != nil {
 		return nil, err
 	}
 
 	_, err = db.Exec(
-`UPDATE messages SET content = '[deleted]', deleted = 1, edited = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-id,
-)
+		`UPDATE messages SET content = '[deleted]', deleted = 1, edited = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		id,
+	)
 	if err != nil {
 		return nil, err
 	}
