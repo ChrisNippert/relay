@@ -97,6 +97,8 @@ export const getMembers = (id: string) => request<ServerMember[]>('GET', `/serve
 export const getOnlineUsers = (id: string) => request<string[]>('GET', `/servers/${encodeURIComponent(id)}/online`)
 export const updateMemberRole = (serverId: string, userId: string, role: string) =>
   request<{ role: string }>('PUT', `/servers/${encodeURIComponent(serverId)}/members/${encodeURIComponent(userId)}/role`, { role })
+export const kickMember = (serverId: string, userId: string) =>
+  request<void>('DELETE', `/servers/${encodeURIComponent(serverId)}/members/${encodeURIComponent(userId)}`)
 
 // Server invites
 export const createInvite = (serverId: string, maxUses = 0, expiresIn = 0) =>
@@ -129,6 +131,8 @@ export const getDMParticipants = (channelId: string) =>
 // Messages
 export const getMessages = (channelId: string, limit = 50, offset = 0) =>
   request<Message[]>('GET', `/channels/${encodeURIComponent(channelId)}/messages?limit=${limit}&offset=${offset}`)
+export const searchMessages = (channelId: string, query: string, limit = 50) =>
+  request<Message[]>('GET', `/channels/${encodeURIComponent(channelId)}/messages/search?q=${encodeURIComponent(query)}&limit=${limit}`)
 export const editMessage = (messageId: string, content: string) =>
   request<Message>('PUT', `/messages/${encodeURIComponent(messageId)}`, { content })
 export const deleteMessage = (messageId: string) =>

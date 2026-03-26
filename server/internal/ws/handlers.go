@@ -84,6 +84,8 @@ func handleMessage(c *Client, raw []byte) {
 		handleVoiceJoin(c, msg.Payload)
 	case "voice_leave":
 		handleVoiceLeave(c, msg.Payload)
+	case "voice_kick":
+		handleVoiceKick(c, msg.Payload)
 	default:
 		log.Printf("Unknown WebSocket message type: %s", msg.Type)
 	}
@@ -209,10 +211,21 @@ func handleDeleteMessage(c *Client, payload json.RawMessage) {
 		return
 	}
 
-	// Verify ownership
+	// Verify ownership or admin status
 	existing, err := c.hub.db.GetMessage(p.MessageID)
-	if err != nil || existing.UserID != c.userID {
+	if err != nil {
 		return
+	}
+	if existing.UserID != c.userID {
+		// Check if user is admin of the server this channel belongs to
+		ch, chErr := c.hub.db.GetChannel(existing.ChannelID)
+		if chErr != nil || ch.ServerID == "" {
+			return
+		}
+		role, roleErr := c.hub.db.GetMemberRole(ch.ServerID, c.userID)
+		if roleErr != nil || role != "admin" {
+			return
+		}
 	}
 
 	updated, err := c.hub.db.DeleteMessage(p.MessageID, c.userID)
@@ -321,6 +334,49 @@ func handleVoiceLeave(c *Client, payload json.RawMessage) {
 	}
 	data := mustMarshal(msg)
 	c.hub.SendToChannel(p.ChannelID, data, "")
+}
+
+func handleVoiceKick(c *Client, payload json.RawMessage) {
+	var p struct {
+		ChannelID string `json:"channel_id"`
+		UserID    string `json:"user_id"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return
+	}
+
+	// Check that the channel belongs to a server and requester is admin
+	channel, err := c.hub.db.GetChannel(p.ChannelID)
+	if err != nil || channel.ServerID == "" {
+		return
+	}
+	role, err := c.hub.db.GetMemberRole(channel.ServerID, c.userID)
+	if err != nil || role != "admin" {
+		return
+	}
+
+	// Remove the target user from voice
+	c.hub.VoiceLeave(p.ChannelID, p.UserID)
+
+	// Notify kicked user
+	kickMsg := WSMessage{
+		Type: "voice_kicked",
+		Payload: json.RawMessage(mustMarshal(map[string]interface{}{
+			"channel_id": p.ChannelID,
+		})),
+	}
+	c.hub.SendToUser(p.UserID, mustMarshal(kickMsg))
+
+	// Broadcast updated voice state
+	users := c.hub.VoiceUsers(p.ChannelID)
+	stateMsg := WSMessage{
+		Type: "voice_state",
+		Payload: json.RawMessage(mustMarshal(map[string]interface{}{
+			"channel_id": p.ChannelID,
+			"user_ids":   users,
+		})),
+	}
+	c.hub.SendToChannel(p.ChannelID, mustMarshal(stateMsg), "")
 }
 
 // HandleDisconnect cleans up voice state when a user disconnects.

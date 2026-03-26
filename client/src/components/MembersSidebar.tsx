@@ -72,10 +72,15 @@ export default function MembersSidebar({ serverId, onMessage, isAdmin }: Members
           }
           return next
         })
+      } else if (msg.type === 'member_kicked') {
+        const payload = msg.payload as { user_id: string; server_id: string }
+        if (payload.server_id === serverId) {
+          setMembers((prev) => prev.filter((m) => m.user.id !== payload.user_id))
+        }
       }
     })
     return unsub
-  }, [])
+  }, [serverId])
 
   const handleMemberClick = (userId: string, e: React.MouseEvent) => {
     if (popover?.userId === userId) {
@@ -145,6 +150,9 @@ export default function MembersSidebar({ serverId, onMessage, isAdmin }: Members
             setMembers((prev) => prev.map((m) =>
               m.user.id === userId ? { ...m, member: { ...m.member, role: newRole } } : m
             ))
+          }}
+          onKicked={(userId) => {
+            setMembers((prev) => prev.filter((m) => m.user.id !== userId))
           }}
         />
       )}

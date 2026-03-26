@@ -49,6 +49,45 @@ func GetMessagesHandler(database *db.DB) http.HandlerFunc {
 	}
 }
 
+func SearchMessagesHandler(database *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		channelID := chi.URLParam(r, "channelID")
+
+		hasAccess, err := database.IsChannelParticipant(channelID, GetUserID(r))
+		if err != nil || !hasAccess {
+			http.Error(w, `{"error":"access denied"}`, http.StatusForbidden)
+			return
+		}
+
+		q := r.URL.Query().Get("q")
+		if q == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte("[]"))
+			return
+		}
+
+		limit := 50
+		if l := r.URL.Query().Get("limit"); l != "" {
+			if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
+				limit = parsed
+			}
+		}
+
+		messages, err := database.SearchMessages(channelID, q, limit)
+		if err != nil {
+			http.Error(w, `{"error":"search failed"}`, http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if messages == nil {
+			w.Write([]byte("[]"))
+			return
+		}
+		json.NewEncoder(w).Encode(messages)
+	}
+}
+
 func EditMessageHandler(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		msgID := chi.URLParam(r, "messageID")
@@ -102,8 +141,17 @@ func DeleteMessageHandler(database *db.DB) http.HandlerFunc {
 			return
 		}
 		if msg.UserID != userID {
-			http.Error(w, `{"error":"not your message"}`, http.StatusForbidden)
-			return
+			// Allow server admins to delete messages in their server's channels
+			ch, chErr := database.GetChannel(msg.ChannelID)
+			if chErr != nil || ch.ServerID == "" {
+				http.Error(w, `{"error":"not your message"}`, http.StatusForbidden)
+				return
+			}
+			role, roleErr := database.GetMemberRole(ch.ServerID, userID)
+			if roleErr != nil || role != "admin" {
+				http.Error(w, `{"error":"not your message"}`, http.StatusForbidden)
+				return
+			}
 		}
 
 		updated, err := database.DeleteMessage(msgID, userID)

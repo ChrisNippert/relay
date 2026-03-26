@@ -70,6 +70,7 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		r.Get("/api/servers/{serverID}/members", GetMembersHandler(database))
 		r.Get("/api/servers/{serverID}/online", GetOnlineUsersHandler(database, hub))
 		r.Put("/api/servers/{serverID}/members/{userID}/role", UpdateMemberRoleHandler(database, hub))
+		r.Delete("/api/servers/{serverID}/members/{userID}", KickMemberHandler(database, hub))
 
 		// Server invites
 		r.Post("/api/servers/{serverID}/invites", CreateInviteHandler(database))
@@ -91,6 +92,7 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 
 		// Messages
 		r.Get("/api/channels/{channelID}/messages", GetMessagesHandler(database))
+		r.Get("/api/channels/{channelID}/messages/search", SearchMessagesHandler(database))
 		r.Put("/api/messages/{messageID}", EditMessageHandler(database))
 		r.Delete("/api/messages/{messageID}", DeleteMessageHandler(database))
 		r.Get("/api/messages/{messageID}/history", GetEditHistoryHandler(database))

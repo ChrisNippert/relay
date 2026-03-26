@@ -126,3 +126,7 @@ export function sendVoiceJoin(channelId: string) {
 export function sendVoiceLeave(channelId: string) {
   send('voice_leave', { channel_id: channelId })
 }
+
+export function sendVoiceKick(channelId: string, userId: string) {
+  send('voice_kick', { channel_id: channelId, user_id: userId })
+}

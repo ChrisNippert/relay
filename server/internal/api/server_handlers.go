@@ -259,3 +259,57 @@ func UpdateMemberRoleHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
 		json.NewEncoder(w).Encode(map[string]string{"role": req.Role})
 	}
 }
+
+func KickMemberHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		serverID := chi.URLParam(r, "serverID")
+		targetUserID := chi.URLParam(r, "userID")
+		userID := GetUserID(r)
+
+		// Only admins can kick
+		role, err := database.GetMemberRole(serverID, userID)
+		if err != nil || role != "admin" {
+			http.Error(w, `{"error":"admin access required"}`, http.StatusForbidden)
+			return
+		}
+
+		// Cannot kick yourself
+		if targetUserID == userID {
+			http.Error(w, `{"error":"cannot kick yourself"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Cannot kick the server owner
+		server, err := database.GetServer(serverID)
+		if err != nil {
+			http.Error(w, `{"error":"server not found"}`, http.StatusNotFound)
+			return
+		}
+		if targetUserID == server.OwnerID {
+			http.Error(w, `{"error":"cannot kick the server owner"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Non-owner admins cannot kick other admins
+		if server.OwnerID != userID {
+			targetRole, _ := database.GetMemberRole(serverID, targetUserID)
+			if targetRole == "admin" {
+				http.Error(w, `{"error":"only the owner can kick admins"}`, http.StatusForbidden)
+				return
+			}
+		}
+
+		if err := database.RemoveServerMember(serverID, targetUserID); err != nil {
+			http.Error(w, `{"error":"failed to kick member"}`, http.StatusInternalServerError)
+			return
+		}
+
+		// Broadcast kick event
+		broadcastChannelEvent(hub, serverID, "member_kicked", map[string]string{
+			"server_id": serverID,
+			"user_id":   targetUserID,
+		})
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}

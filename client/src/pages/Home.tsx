@@ -192,6 +192,17 @@ export default function Home() {
         const uid = (payload as { user_id: string }).user_id
         const role = (payload as { role: string }).role
         if (uid === user?.id) setIsAdmin(role === 'admin')
+      } else if (msg.type === 'member_kicked') {
+        const uid = (payload as { user_id: string }).user_id
+        if (uid === user?.id) {
+          // We were kicked from this server
+          setServers((prev) => prev.filter((s) => s.id !== serverID))
+          if (selectedServer?.id === serverID) {
+            setSelectedServer(null)
+            setSelectedChannel(null)
+            setView('dm')
+          }
+        }
       }
     })
     return unsub
@@ -451,6 +462,7 @@ export default function Home() {
               ref={voiceRef}
               channel={activeVoiceChannel}
               autoJoin
+              isAdmin={isAdmin}
               onJoin={() => { setActiveVoiceChannel(activeVoiceChannel); syncVoiceControls() }}
               onLeave={handleVoiceLeave}
             />
@@ -469,7 +481,8 @@ export default function Home() {
             />
           ) : selectedChannel && !isVoiceChannel ? (
             <ChatView channel={selectedChannel} onStartCall={handleStartDMCall} onDMUser={handleDMUser}
-              showMembersToggle={view === 'server'} showMembers={showMembers} onToggleMembers={() => setShowMembers((p) => !p)} />
+              showMembersToggle={view === 'server'} showMembers={showMembers} onToggleMembers={() => setShowMembers((p) => !p)}
+              isAdmin={isAdmin} serverId={selectedServer?.id} />
           ) : !selectedChannel ? (
             <div className="no-channel">
               <p>Select a channel to start chatting</p>

@@ -25,6 +25,8 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
   const [settingsChannel, setSettingsChannel] = useState<Channel | null>(null)
   const [creatingType, setCreatingType] = useState<'text' | 'voice' | null>(null)
   const [createName, setCreateName] = useState('')
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
 
   const handleCreateStart = (type: 'text' | 'voice') => {
     setCreatingType(type)
@@ -44,25 +46,45 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
     setCreateName('')
   }
 
-  const handleMove = async (ch: Channel, dir: -1 | 1) => {
-    if (!serverId) return
-    const group = channels.filter((c) => c.type === ch.type).sort((a, b) => a.position - b.position)
-    const idx = group.findIndex((c) => c.id === ch.id)
-    const swapIdx = idx + dir
-    if (swapIdx < 0 || swapIdx >= group.length) return
-    const other = group[swapIdx]
-    if (!other) return
-    const positions: Record<string, number> = {
-      [ch.id]: other.position,
-      [other.id]: ch.position,
+  const handleDrop = async (targetCh: Channel) => {
+    if (!serverId || !dragId || dragId === targetCh.id) {
+      setDragId(null)
+      setDragOverId(null)
+      return
     }
+    const dragCh = channels.find((c) => c.id === dragId)
+    if (!dragCh || dragCh.type !== targetCh.type) {
+      setDragId(null)
+      setDragOverId(null)
+      return
+    }
+    const group = channels.filter((c) => c.type === dragCh.type).sort((a, b) => a.position - b.position)
+    const fromIdx = group.findIndex((c) => c.id === dragId)
+    const toIdx = group.findIndex((c) => c.id === targetCh.id)
+    if (fromIdx === -1 || toIdx === -1) return
+    const reordered = [...group]
+    reordered.splice(fromIdx, 1)
+    reordered.splice(toIdx, 0, dragCh)
+    const positions: Record<string, number> = {}
+    reordered.forEach((c, i) => { positions[c.id] = i })
+    setDragId(null)
+    setDragOverId(null)
     await api.updateChannelPositions(serverId, positions)
     onChannelsChanged?.()
   }
 
   const renderChannelItem = (ch: Channel) => {
     return (
-      <div key={ch.id} className="channel-item-row">
+      <div
+        key={ch.id}
+        className={`channel-item-row ${dragOverId === ch.id ? 'drag-over' : ''}`}
+        draggable={!!isAdmin}
+        onDragStart={(e) => { setDragId(ch.id); e.dataTransfer.effectAllowed = 'move' }}
+        onDragEnd={() => { setDragId(null); setDragOverId(null) }}
+        onDragOver={(e) => { e.preventDefault(); setDragOverId(ch.id) }}
+        onDragLeave={() => setDragOverId(null)}
+        onDrop={(e) => { e.preventDefault(); handleDrop(ch) }}
+      >
         <button
           className={`channel-item ${selected?.id === ch.id ? 'active' : ''}`}
           onClick={() => onSelect(ch)}
@@ -71,8 +93,6 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
         </button>
         {isAdmin && (
           <div className="channel-actions">
-            <button className="channel-action-btn" onClick={() => handleMove(ch, -1)} title="Move up">▲</button>
-            <button className="channel-action-btn" onClick={() => handleMove(ch, 1)} title="Move down">▼</button>
             <button className="channel-action-btn" onClick={() => setSettingsChannel(ch)} title="Settings">⚙️</button>
           </div>
         )}

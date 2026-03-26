@@ -169,6 +169,50 @@ func (db *DB) GetMessages(channelID string, limit, offset int) ([]models.Message
 	return messages, rows.Err()
 }
 
+func (db *DB) SearchMessages(channelID, query string, limit int) ([]models.Message, error) {
+	rows, err := db.Query(
+		`SELECT m.id, m.channel_id, m.user_id, m.content, m.nonce, m.type, m.reply_to_id, m.edited, m.deleted, m.created_at, m.updated_at,
+		        u.username, u.display_name, u.avatar_url, u.name_color
+		 FROM messages m
+		 JOIN users u ON m.user_id = u.id
+		 WHERE m.channel_id = ? AND m.deleted = 0 AND m.content LIKE '%' || ? || '%'
+		 ORDER BY m.created_at DESC
+		 LIMIT ?`,
+		channelID, query, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var messages []models.Message
+	for rows.Next() {
+		var m models.Message
+		var username, displayName, avatarURL, nameColor string
+		var replyToID sql.NullString
+		if err := rows.Scan(&m.ID, &m.ChannelID, &m.UserID, &m.Content, &m.Nonce, &m.Type,
+			&replyToID, &m.Edited, &m.Deleted, &m.CreatedAt, &m.UpdatedAt, &username, &displayName, &avatarURL, &nameColor); err != nil {
+			return nil, err
+		}
+		if replyToID.Valid {
+			m.ReplyToID = &replyToID.String
+		}
+		m.Author = &models.User{
+			ID:          m.UserID,
+			Username:    username,
+			DisplayName: displayName,
+			AvatarURL:   avatarURL,
+			NameColor:   nameColor,
+		}
+		attachments, _ := db.GetMessageAttachments(m.ID)
+		if attachments != nil {
+			m.Attachments = attachments
+		}
+		messages = append(messages, m)
+	}
+	return messages, rows.Err()
+}
+
 // DeleteMessage soft-deletes a message: records the original content in edit
 // history, replaces content with "[deleted]", and sets deleted=1.
 func (db *DB) DeleteMessage(id, requestingUserID string) (*models.Message, error) {

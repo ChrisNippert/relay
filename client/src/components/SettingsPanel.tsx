@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getSettings, saveSettings, getDevices, type MediaSettings } from '../services/settings'
+import { getSettings, saveSettings, getDevices, type MediaSettings, THEME_PRESETS, getThemeId, saveThemeId, applyTheme } from '../services/settings'
 import { useAuth } from '../context/AuthContext'
 import * as api from '../services/api'
 
@@ -30,7 +30,8 @@ export default function SettingsPanel({ onClose }: Props) {
   const [nameColor, setNameColor] = useState(user?.name_color ?? '')
   const [profileSaving, setProfileSaving] = useState(false)
   const [profileSaved, setProfileSaved] = useState(false)
-  const [tab, setTab] = useState<'profile' | 'media'>('profile')
+  const [tab, setTab] = useState<'profile' | 'media' | 'theme'>('profile')
+  const [activeTheme, setActiveTheme] = useState(getThemeId)
 
   // Only load devices when media tab is opened
   useEffect(() => {
@@ -99,6 +100,9 @@ export default function SettingsPanel({ onClose }: Props) {
           </button>
           <button className={`settings-tab ${tab === 'media' ? 'active' : ''}`} onClick={() => setTab('media')}>
             Audio &amp; Video
+          </button>
+          <button className={`settings-tab ${tab === 'theme' ? 'active' : ''}`} onClick={() => setTab('theme')}>
+            Theme
           </button>
         </div>
 
@@ -271,6 +275,40 @@ export default function SettingsPanel({ onClose }: Props) {
             </div>
           )
         )}
+        {tab === 'theme' && (
+          <div className="settings-body">
+            <h3 className="settings-section">Theme</h3>
+            <div className="theme-grid">
+              {THEME_PRESETS.map((theme) => (
+                <button
+                  key={theme.id}
+                  className={`theme-card ${activeTheme === theme.id ? 'selected' : ''}`}
+                  onClick={() => {
+                    setActiveTheme(theme.id)
+                    saveThemeId(theme.id)
+                    applyTheme(theme)
+                  }}
+                >
+                  <div className="theme-card-preview">
+                    <div className="theme-preview-sidebar" style={{ background: theme.colors['--bg-secondary'] }}>
+                      <div className="theme-preview-dot" style={{ background: theme.colors['--accent'] }} />
+                      <div className="theme-preview-dot" style={{ background: theme.colors['--text-muted'] }} />
+                      <div className="theme-preview-dot" style={{ background: theme.colors['--text-muted'] }} />
+                    </div>
+                    <div className="theme-preview-main" style={{ background: theme.colors['--bg-primary'] }}>
+                      <div className="theme-preview-msg" style={{ background: theme.colors['--bg-secondary'], borderColor: theme.colors['--border'] }} />
+                      <div className="theme-preview-msg" style={{ background: theme.colors['--bg-secondary'], borderColor: theme.colors['--border'] }} />
+                      <div className="theme-preview-input" style={{ background: theme.colors['--bg-input'], borderColor: theme.colors['--border'] }} />
+                    </div>
+                  </div>
+                  <span className="theme-card-name">{theme.name}</span>
+                  {activeTheme === theme.id && <span className="theme-card-check">✓</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="settings-logout-section">
           <button className="danger-btn settings-logout-btn" onClick={logout}>Log Out</button>
         </div>

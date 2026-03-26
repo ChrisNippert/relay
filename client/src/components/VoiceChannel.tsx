@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useImperativeHandle, forwardRef } from 'react'
 import type { Channel, WSMessage as WSMsg } from '../types'
 import { useAuth } from '../context/AuthContext'
-import { subscribe, sendCallOffer, sendCallAnswer, sendIceCandidate, sendCallEnd, sendVoiceJoin, sendVoiceLeave } from '../services/ws'
+import { subscribe, sendCallOffer, sendCallAnswer, sendIceCandidate, sendCallEnd, sendVoiceJoin, sendVoiceLeave, sendVoiceKick } from '../services/ws'
 import { PeerConnection } from '../services/webrtc'
 import * as api from '../services/api'
 import { playJoinSound, playLeaveSound, playConnectedSound, playDisconnectedSound, playCallRing, playErrorSound } from '../services/sounds'
@@ -12,6 +12,7 @@ interface Props {
   autoJoin?: boolean
   onJoin?: () => void
   onLeave?: () => void
+  isAdmin?: boolean
 }
 
 export interface VoiceChannelHandle {
@@ -36,7 +37,7 @@ interface VoiceUser {
   speaking: boolean
 }
 
-export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ channel, autoJoin, onJoin, onLeave }, ref) {
+export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ channel, autoJoin, onJoin, onLeave, isAdmin }, ref) {
   const { user } = useAuth()
   const [joined, setJoined] = useState(false)
   const [voiceUsers, setVoiceUsers] = useState<VoiceUser[]>([])
@@ -64,6 +65,8 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
   const audioContextRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const speakingAnimRef = useRef<number>(0)
+  const kickedRef = useRef(false)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; userId: string; displayName: string } | null>(null)
 
   // Load server members for display names, or DM participants
   useEffect(() => {
@@ -107,6 +110,11 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         const payload = msg.payload as { channel_id: string; user_ids: string[] }
         if (payload.channel_id === channel.id) {
           setChannelVoiceUsers(payload.user_ids || [])
+        }
+      } else if (msg.type === 'voice_kicked') {
+        const payload = msg.payload as { channel_id: string }
+        if (payload.channel_id === channel.id) {
+          kickedRef.current = true
         }
       }
     })
@@ -466,6 +474,18 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     onLeave?.()
   }
 
+  // Handle being kicked from voice
+  useEffect(() => {
+    if (!joined) return
+    const interval = setInterval(() => {
+      if (kickedRef.current) {
+        kickedRef.current = false
+        leaveVoice()
+      }
+    }, 200)
+    return () => clearInterval(interval)
+  }, [joined])
+
   function toggleMute() {
     const stream = localStreamRef.current
     if (!stream) return
@@ -592,12 +612,17 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     }
   }
 
-  // Build display tiles: screen shares become their own separate tiles
-  const displayTiles: { tileId: string; userId: string; displayName: string; isSelf: boolean; speaking: boolean; type: 'user' | 'screen'; hasVideo: boolean }[] = []
+  // Build display tiles: screenshare replaces user tile when no video; combined tile when both
+  const displayTiles: { tileId: string; userId: string; displayName: string; isSelf: boolean; speaking: boolean; type: 'user' | 'screen'; hasVideo: boolean; hasScreen: boolean }[] = []
   for (const vu of voiceUsers) {
-    displayTiles.push({ tileId: vu.id, userId: vu.id, displayName: vu.displayName, isSelf: vu.isSelf, speaking: vu.speaking, type: 'user', hasVideo: vu.hasVideo })
-    if (vu.hasScreen) {
-      displayTiles.push({ tileId: `${vu.id}:screen`, userId: vu.id, displayName: vu.displayName, isSelf: vu.isSelf, speaking: false, type: 'screen', hasVideo: false })
+    if (vu.hasScreen && !vu.hasVideo) {
+      // Screen takes user's tile spot
+      displayTiles.push({ tileId: vu.id, userId: vu.id, displayName: vu.displayName, isSelf: vu.isSelf, speaking: vu.speaking, type: 'screen', hasVideo: false, hasScreen: true })
+    } else if (vu.hasScreen && vu.hasVideo) {
+      // Combined tile with both camera and screen
+      displayTiles.push({ tileId: vu.id, userId: vu.id, displayName: vu.displayName, isSelf: vu.isSelf, speaking: vu.speaking, type: 'user', hasVideo: true, hasScreen: true })
+    } else {
+      displayTiles.push({ tileId: vu.id, userId: vu.id, displayName: vu.displayName, isSelf: vu.isSelf, speaking: vu.speaking, type: 'user', hasVideo: vu.hasVideo, hasScreen: false })
     }
   }
 
@@ -610,6 +635,18 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     setFocusedUser((prev) => prev === tileId ? null : tileId)
   }
 
+  const handleTileContextMenu = (e: React.MouseEvent, tile: typeof displayTiles[0]) => {
+    if (!isAdmin || tile.isSelf) return
+    e.preventDefault()
+    setContextMenu({ x: e.clientX, y: e.clientY, userId: tile.userId, displayName: tile.displayName })
+  }
+
+  const handleVoiceKick = () => {
+    if (!contextMenu) return
+    sendVoiceKick(channel.id, contextMenu.userId)
+    setContextMenu(null)
+  }
+
   const renderTile = (tile: typeof displayTiles[0], isFocused: boolean, isUnfocused: boolean) => {
     const remoteStream = remoteStreams.get(tile.userId)
     const remoteScreen = remoteScreenStreams.get(tile.userId)
@@ -620,6 +657,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
           key={tile.tileId}
           className={`voice-tile has-media ${isFocused ? 'focused' : ''} ${isUnfocused ? 'unfocused' : ''}`}
           onClick={() => handleTileClick(tile.tileId)}
+          onContextMenu={(e) => handleTileContextMenu(e, tile)}
         >
           <div className="voice-tile-media">
             <div className="voice-tile-video-pane screen-pane">
@@ -645,10 +683,44 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     return (
       <div
         key={tile.tileId}
-        className={`voice-tile ${tile.speaking ? 'speaking' : ''} ${tile.isSelf ? 'is-self' : ''} ${muted && tile.isSelf ? 'is-muted' : ''} ${isFocused ? 'focused' : ''} ${isUnfocused ? 'unfocused' : ''} ${tile.hasVideo ? 'has-media' : ''}`}
+        className={`voice-tile ${tile.speaking ? 'speaking' : ''} ${tile.isSelf ? 'is-self' : ''} ${muted && tile.isSelf ? 'is-muted' : ''} ${isFocused ? 'focused' : ''} ${isUnfocused ? 'unfocused' : ''} ${(tile.hasVideo || tile.hasScreen) ? 'has-media' : ''}`}
         onClick={() => handleTileClick(tile.tileId)}
+        onContextMenu={(e) => handleTileContextMenu(e, tile)}
       >
-        {tile.hasVideo ? (
+        {tile.hasVideo && tile.hasScreen ? (
+          <div className="voice-tile-media voice-tile-dual">
+            <div className="voice-tile-video-pane screen-pane">
+              {tile.isSelf ? (
+                <video ref={(el) => {
+                  localScreenRef.current = el
+                  if (el && screenStreamRef.current && el.srcObject !== screenStreamRef.current) {
+                    el.srcObject = screenStreamRef.current
+                  }
+                }} autoPlay playsInline muted />
+              ) : remoteScreen ? (
+                <video autoPlay playsInline ref={(el) => { if (el && el.srcObject !== remoteScreen) el.srcObject = remoteScreen }} />
+              ) : null}
+            </div>
+            <div className="voice-tile-pip">
+              {tile.isSelf ? (
+                <video ref={(el) => {
+                  localVideoRef.current = el
+                  if (el && localStreamRef.current && el.srcObject !== localStreamRef.current) {
+                    el.srcObject = localStreamRef.current
+                  }
+                }} autoPlay playsInline muted />
+              ) : remoteStream ? (
+                <video autoPlay playsInline ref={(el) => { if (el && el.srcObject !== remoteStream) el.srcObject = remoteStream }} />
+              ) : null}
+            </div>
+            <div className="voice-tile-overlay">
+              <span className="voice-tile-name">
+                {tile.displayName}
+                {tile.isSelf && <span className="voice-tile-tag"> (you)</span>}
+              </span>
+            </div>
+          </div>
+        ) : tile.hasVideo ? (
           <div className="voice-tile-media">
             <div className="voice-tile-video-pane camera-pane">
               {tile.isSelf ? (
@@ -725,6 +797,17 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
 
       {/* Hidden container for remote audio elements */}
       <div ref={remoteAudioRef} style={{ display: 'none' }} />
+
+      {/* Voice kick context menu */}
+      {contextMenu && (
+        <div className="voice-context-menu-overlay" onClick={() => setContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setContextMenu(null) }}>
+          <div className="voice-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(e) => e.stopPropagation()}>
+            <button className="voice-context-menu-item kick" onClick={handleVoiceKick}>
+              Kick {contextMenu.displayName} from Voice
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 })

@@ -12,9 +12,10 @@ interface Props {
   memberRole?: string
   isAdmin?: boolean
   onRoleChanged?: (userId: string, newRole: string) => void
+  onKicked?: (userId: string) => void
 }
 
-export default function UserPopover({ userId, anchorRect, onClose, onMessage, serverId, memberRole, isAdmin, onRoleChanged }: Props) {
+export default function UserPopover({ userId, anchorRect, onClose, onMessage, serverId, memberRole, isAdmin, onRoleChanged, onKicked }: Props) {
   const { user: me } = useAuth()
   const [userInfo, setUserInfo] = useState<User | null>(null)
   const [friendship, setFriendship] = useState<Friendship | null>(null)
@@ -49,11 +50,15 @@ export default function UserPopover({ userId, anchorRect, onClose, onMessage, se
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        // Check if the click target is a member item (toggle handled by parent)
+        const target = e.target as HTMLElement
+        if (target.closest('.member-item') || target.closest('.message-author')) return
         onClose()
       }
     }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
+    // Use setTimeout to avoid catching the same click that opened the popover
+    const id = setTimeout(() => document.addEventListener('mousedown', handler), 0)
+    return () => { clearTimeout(id); document.removeEventListener('mousedown', handler) }
   }, [onClose])
 
   // Position the popover
@@ -102,6 +107,19 @@ export default function UserPopover({ userId, anchorRect, onClose, onMessage, se
       setCurrentRole(newRole)
       onRoleChanged?.(userId, newRole)
     } catch { /* ignore */ }
+  }
+
+  const handleKick = async () => {
+    if (!serverId) return
+    if (!confirm(`Kick this user from the server?`)) return
+    try {
+      await api.kickMember(serverId, userId)
+      onKicked?.(userId)
+      onClose()
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      alert('Failed to kick: ' + msg)
+    }
   }
 
   let friendStatus: 'none' | 'pending-sent' | 'pending-received' | 'accepted' = 'none'
@@ -181,6 +199,11 @@ export default function UserPopover({ userId, anchorRect, onClose, onMessage, se
                   onClick={handleToggleAdmin}
                 >
                   {currentRole === 'admin' ? '★ Remove Admin' : '☆ Make Admin'}
+                </button>
+              )}
+              {isAdmin && serverId && currentRole && currentRole !== 'owner' && (
+                <button className="user-popover-btn kick" onClick={handleKick}>
+                  Kick from Server
                 </button>
               )}
             </div>

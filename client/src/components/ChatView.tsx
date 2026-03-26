@@ -14,6 +14,8 @@ interface Props {
   showMembersToggle?: boolean
   showMembers?: boolean
   onToggleMembers?: () => void
+  isAdmin?: boolean
+  serverId?: string
 }
 
 const URL_REGEX = /https?:\/\/[^\s<]+/g
@@ -179,7 +181,7 @@ function LinkEmbed({ url, onImageLoad }: { url: string; onImageLoad?: () => void
   )
 }
 
-export default function ChatView({ channel, onStartCall, onDMUser, showMembersToggle, showMembers, onToggleMembers }: Props) {
+export default function ChatView({ channel, onStartCall, onDMUser, showMembersToggle, showMembers, onToggleMembers, isAdmin, serverId }: Props) {
   const { user } = useAuth()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -193,6 +195,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
   const [hasMore, setHasMore] = useState(true)
   const [replyingTo, setReplyingTo] = useState<Message | null>(null)
   const [editingMsg, setEditingMsg] = useState<Message | null>(null)
+  const [inlineEditText, setInlineEditText] = useState('')
   const [dragging, setDragging] = useState(false)
   const dragCounter = useRef(0)
   const [historyMsg, setHistoryMsg] = useState<Message | null>(null)
@@ -201,6 +204,11 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
   const [members, setMembers] = useState<User[]>([])
   const [popover, setPopover] = useState<{ userId: string; rect: DOMRect } | null>(null)
   const [encrypted, setEncrypted] = useState(false)
+  const [showScrollBtn, setShowScrollBtn] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<Message[] | null>(null)
+  const [searchLoading, setSearchLoading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const isAtBottomRef = useRef(true)
@@ -382,6 +390,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     if (!list) return
     // Track whether user is at the bottom
     isAtBottomRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 200
+    setShowScrollBtn(!isAtBottomRef.current)
     if (loadingOlder || !hasMore) return
     if (list.scrollTop < 100) {
       setLoadingOlder(true)
@@ -411,6 +420,27 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
         .finally(() => setLoadingOlder(false))
     }
   }, [channel.id, messages.length, loadingOlder, hasMore])
+
+  const handleSearch = useCallback(async () => {
+    if (!searchQuery.trim()) {
+      setSearchResults(null)
+      return
+    }
+    setSearchLoading(true)
+    try {
+      const results = await api.searchMessages(channel.id, searchQuery.trim())
+      setSearchResults(results.reverse())
+    } catch {
+      setSearchResults([])
+    }
+    setSearchLoading(false)
+  }, [channel.id, searchQuery])
+
+  const closeSearch = () => {
+    setSearchOpen(false)
+    setSearchQuery('')
+    setSearchResults(null)
+  }
 
   const handleInput = (value: string) => {
     setInput(value)
@@ -448,16 +478,6 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     const text = input.trim()
     if (!text && pendingFiles.length === 0) return
 
-    // Edit mode: send edit instead of new message
-    if (editingMsg) {
-      if (text) sendEditMessage(editingMsg.id, text)
-      setEditingMsg(null)
-      setInput('')
-      sendTypingStop(channel.id)
-      clearTimeout(typingTimerRef.current)
-      return
-    }
-
     // Wait for any still-uploading files
     const stillUploading = pendingFiles.some(f => !f.id && !f.error)
     if (stillUploading) {
@@ -487,13 +507,20 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     setTimeout(() => inputRef.current?.focus(), 0)
   }
 
-  // Pre-fill input when entering edit mode
+  // Pre-fill input when entering edit mode — no longer needed for in-place editing
   useEffect(() => {
     if (editingMsg) {
-      setInput(editingMsg.content)
-      inputRef.current?.focus()
+      // Focus is handled by the inline edit input ref callback
     }
   }, [editingMsg])
+
+  // Auto-resize textarea to fit content
+  useEffect(() => {
+    const ta = inputRef.current
+    if (!ta) return
+    ta.style.height = 'auto'
+    ta.style.height = Math.min(ta.scrollHeight, 300) + 'px'
+  }, [input])
 
   const handleReply = (m: Message) => {
     setEditingMsg(null)
@@ -504,11 +531,24 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
   const handleEdit = (m: Message) => {
     setReplyingTo(null)
     setEditingMsg(m)
-    // input pre-filled via useEffect
+    setInlineEditText(m.content)
   }
 
   const handleDelete = (m: Message) => {
     sendDeleteMessage(m.id)
+  }
+
+  const handleInlineEditSave = () => {
+    if (editingMsg && inlineEditText.trim()) {
+      sendEditMessage(editingMsg.id, inlineEditText.trim())
+    }
+    setEditingMsg(null)
+    setInlineEditText('')
+  }
+
+  const handleInlineEditCancel = () => {
+    setEditingMsg(null)
+    setInlineEditText('')
   }
 
   const handleHistoryClick = async (m: Message) => {
@@ -634,6 +674,9 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
           {encrypted && <span className="chat-header-lock" title="End-to-end encrypted">🔒</span>}
         </span>
         <div className="chat-header-actions">
+          <button className="chat-call-btn" onClick={() => setSearchOpen((p) => { if (p) closeSearch(); return !p })} title="Search Messages">
+            🔍
+          </button>
           {dmPartnerId && onStartCall && (
             <>
               <button className="chat-call-btn" onClick={() => onStartCall(dmPartnerId, false)} title="Voice Call">
@@ -656,6 +699,44 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
         </div>
       </div>
 
+      {searchOpen && (
+        <div className="chat-search-bar">
+          <input
+            type="text"
+            className="chat-search-input"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleSearch()
+              if (e.key === 'Escape') closeSearch()
+            }}
+            placeholder="Search messages..."
+            autoFocus
+          />
+          <button className="chat-search-go" onClick={handleSearch} disabled={searchLoading}>
+            {searchLoading ? '...' : 'Search'}
+          </button>
+          <button className="chat-search-close" onClick={closeSearch}>✕</button>
+        </div>
+      )}
+
+      {searchResults !== null ? (
+        <div className="message-list search-results">
+          {searchResults.length === 0 ? (
+            <div className="no-channel"><p>No results found</p></div>
+          ) : searchResults.map((m) => (
+            <div key={m.id} className={`message ${m.deleted ? 'deleted' : ''}`}>
+              <div className="message-header">
+                <span className="message-author" style={m.author?.name_color ? { color: m.author.name_color } : undefined}>
+                  {m.author?.display_name || 'Unknown'}
+                </span>
+                <span className="message-time">{new Date(m.created_at).toLocaleString()}</span>
+              </div>
+              <div className="message-body">{renderMessageContent(m.content)}</div>
+            </div>
+          ))}
+        </div>
+      ) : (
       <div className="message-list" ref={listRef} onScroll={handleScroll} style={!initialScrollDone && messages.length > 0 ? { visibility: 'hidden' } : undefined}>
         {loadingOlder && <div className="loading-older">Loading older messages...</div>}
         {messages.map((m, i) => {
@@ -679,9 +760,9 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                   <button className="msg-action-btn" onClick={() => handleHistoryClick(m)} title="View history">🕐</button>
                 )}
                 {m.user_id === user?.id && !m.deleted && (
-                  <button className="msg-action-btn" onClick={() => handleEdit(m)} title="Edit">📝</button>
+                  <button className="msg-action-btn" onClick={() => handleEdit(m)} title="Edit">✏</button>
                 )}
-                {m.user_id === user?.id && !m.deleted && (
+                {(m.user_id === user?.id || isAdmin) && !m.deleted && (
                   <button className="msg-action-btn msg-action-delete" onClick={() => handleDelete(m)} title="Delete">🗑</button>
                 )}
               </div>
@@ -727,6 +808,34 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                 )}
                 {m.deleted ? (
                   <div className="message-body message-deleted">This message was deleted.</div>
+                ) : editingMsg?.id === m.id ? (
+                  <div className="inline-edit-wrapper">
+                    <textarea
+                      className="inline-edit-textarea"
+                      value={inlineEditText}
+                      onChange={(e) => setInlineEditText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') { e.preventDefault(); handleInlineEditCancel() }
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          const backtickCount = (inlineEditText.match(/```/g) || []).length
+                          if (backtickCount % 2 !== 0) return
+                          e.preventDefault(); handleInlineEditSave()
+                        }
+                      }}
+                      autoFocus
+                      ref={(el) => {
+                        if (el) {
+                          el.style.height = 'auto'
+                          el.style.height = Math.min(el.scrollHeight, 300) + 'px'
+                        }
+                      }}
+                    />
+                    <div className="inline-edit-actions">
+                      <span className="inline-edit-hint">Escape to cancel · Enter to save</span>
+                      <button className="inline-edit-cancel" onClick={handleInlineEditCancel}>Cancel</button>
+                      <button className="inline-edit-save" onClick={handleInlineEditSave}>Save</button>
+                    </div>
+                  </div>
                 ) : (
                   <div className="message-body">
                     {renderMessageContent(m.content)}
@@ -741,7 +850,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                     )}
                   </div>
                 )}
-                {m.attachments && m.attachments.length > 0 && (
+                {!m.deleted && m.attachments && m.attachments.length > 0 && (
                   <div className="message-attachments">
                     {m.attachments.map((a) => {
                       const isImage = /^image\//i.test(a.mime_type)
@@ -766,7 +875,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                     })}
                   </div>
                 )}
-                {embedImages.length > 0 && (
+                {!m.deleted && embedImages.length > 0 && (
                   <div className="message-embeds">
                     {embedImages.map((url, i) => (
                       <a key={i} href={url} target="_blank" rel="noreferrer">
@@ -775,7 +884,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                     ))}
                   </div>
                 )}
-                {embedLinks.length > 0 && (
+                {!m.deleted && embedLinks.length > 0 && (
                   <div className="message-embeds">
                     {embedLinks.map((url, i) => (
                       <LinkEmbed key={i} url={url} onImageLoad={handleMediaLoad} />
@@ -788,6 +897,15 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
         })}
         <div ref={bottomRef} />
       </div>
+      )}
+
+      {showScrollBtn && (
+        <button className="scroll-to-bottom-btn" onClick={() => {
+          bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+        }} title="Jump to latest">
+          ↓
+        </button>
+      )}
 
       {typingUsers.size > 0 && (
         <div className="typing-indicator">
@@ -799,13 +917,6 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
         <div className="reply-bar">
           <span className="reply-bar-text">↩ Replying to <strong>{replyingTo.author?.display_name ?? replyingTo.user_id}</strong>: {replyingTo.content.slice(0, 60)}{replyingTo.content.length > 60 ? '…' : ''}</span>
           <button className="reply-bar-cancel" onClick={() => setReplyingTo(null)}>×</button>
-        </div>
-      )}
-
-      {editingMsg && (
-        <div className="edit-bar">
-          <span className="edit-bar-text">✏ Editing message</span>
-          <button className="edit-bar-cancel" onClick={() => { setEditingMsg(null); setInput('') }}>×</button>
         </div>
       )}
 
@@ -846,11 +957,17 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
             value={input}
             onChange={(e) => handleInput(e.target.value)}
             onPaste={handlePaste}
-            placeholder={editingMsg ? 'Edit message…' : `Message ${channel.server_id ? '#' + channel.name : (dmPartnerName || channel.name || 'this channel')}`}
+            placeholder={`Message ${channel.server_id ? '#' + channel.name : (dmPartnerName || channel.name || 'this channel')}`}
             autoFocus
             rows={1}
             className="message-textarea"
             onKeyDown={e => {
+              if (e.key === 'Escape') {
+                if (replyingTo) {
+                  e.preventDefault()
+                  setReplyingTo(null)
+                }
+              }
               if (e.key === 'ArrowUp' && !input && !editingMsg) {
                 const myLastMsg = [...messages].reverse().find(m => m.user_id === user?.id && !m.deleted)
                 if (myLastMsg) {
@@ -867,7 +984,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
               }
             }}
           />
-          <button type="submit" disabled={uploading || pendingFiles.some(f => !f.id && !f.error)}>{pendingFiles.some(f => !f.id && !f.error) ? 'Uploading…' : editingMsg ? 'Save' : 'Send'}</button>
+          <button type="submit" disabled={uploading || pendingFiles.some(f => !f.id && !f.error)}>{pendingFiles.some(f => !f.id && !f.error) ? 'Uploading…' : 'Send'}</button>
         </form>
       </div>
 
@@ -912,6 +1029,25 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                 </div>
                 <div className={`history-entry-content${historyMsg?.deleted ? ' message-deleted' : ''}`}>{historyMsg?.deleted ? 'This message was deleted.' : historyMsg?.content}</div>
               </div>
+              {historyMsg?.attachments && historyMsg.attachments.length > 0 && (
+                <div className="history-entry">
+                  <div className="history-entry-time">Attachments</div>
+                  <div className="history-entry-attachments">
+                    {historyMsg.attachments.map((a) => {
+                      const isImage = /^image\//i.test(a.mime_type)
+                      return isImage ? (
+                        <a key={a.id} href={api.fileURL(a.id)} target="_blank" rel="noreferrer">
+                          <img src={api.fileURL(a.id)} alt={a.filename} className="history-attachment-image" />
+                        </a>
+                      ) : (
+                        <a key={a.id} href={api.fileURL(a.id)} target="_blank" rel="noreferrer" className="attachment-link">
+                          📎 {a.filename}
+                        </a>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
