@@ -436,6 +436,21 @@ html, body, #root {
   font-size: 0.85rem;
 }
 
+.invite-code.clickable {
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.invite-code.clickable:hover {
+  opacity: 0.7;
+}
+
+.invite-copied-indicator {
+  font-size: 0.7rem;
+  color: var(--success);
+  min-width: 60px;
+}
+
 .invite-uses {
   color: var(--text-muted);
   font-size: 0.7rem;
@@ -820,12 +835,14 @@ html, body, #root {
 
 .user-popover-actions {
   display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
 .user-popover-btn {
-  flex: 1;
+  width: 100%;
   padding: 8px 0;
+  text-align: center;
   border: none;
   border-radius: 6px;
   font-size: 0.8rem;
@@ -863,6 +880,23 @@ html, body, #root {
 .user-popover-btn.friends {
   background: rgba(255, 255, 255, 0.1);
   color: var(--text-secondary);
+}
+
+.user-popover-btn.admin-add {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+}
+
+.user-popover-btn.admin-remove {
+  background: rgba(233, 69, 96, 0.15);
+  color: var(--accent);
+}
+
+.member-admin-badge {
+  color: #fdcb6e;
+  font-size: 0.75rem;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 
 /* Clickable author name */
@@ -1318,7 +1352,7 @@ html, body, #root {
 
 /* Spoiler text */
 .spoiler {
-  background: var(--text-primary);
+  background: var(--bg-tertiary);
   color: transparent;
   border-radius: 3px;
   padding: 0 4px;
@@ -2451,6 +2485,7 @@ html, body, #root {
   border-left: 1px solid var(--border);
   overflow-y: auto;
   flex-shrink: 0;
+  height: 100%;
 }
 
 .members-sidebar-wrapper {
@@ -2458,6 +2493,7 @@ html, body, #root {
   overflow: hidden;
   flex-shrink: 0;
   transition: width 0.25s ease;
+  align-self: stretch;
 }
 
 .members-sidebar-wrapper.open {
@@ -2944,6 +2980,16 @@ html, body, #root {
   margin-top: 12px;
   padding: 10px;
   font-size: 0.95rem;
+}
+
+.settings-logout-section {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-logout-btn {
+  width: 100%;
 }
 
 .settings-preview-btn {

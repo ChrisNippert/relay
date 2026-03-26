@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import type { Server } from '../types'
+import { useEffect, useState } from 'react'
+import type { Server, ServerInvite } from '../types'
 import * as api from '../services/api'
 import { useAuth } from '../context/AuthContext'
 
@@ -16,7 +16,48 @@ export default function ServerSettings({ server, onClose, onServerUpdated, onSer
   const [name, setName] = useState(server.name)
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [invites, setInvites] = useState<ServerInvite[]>([])
+  const [copiedCode, setCopiedCode] = useState('')
   const isOwner = user?.id === server.owner_id
+
+  useEffect(() => {
+    api.getInvites(server.id).then(setInvites).catch(() => setInvites([]))
+  }, [server.id])
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedCode(text)
+      setTimeout(() => setCopiedCode(''), 2000)
+    }).catch(() => {
+      const el = document.createElement('textarea')
+      el.value = text
+      document.body.appendChild(el)
+      el.select()
+      document.execCommand('copy')
+      document.body.removeChild(el)
+      setCopiedCode(text)
+      setTimeout(() => setCopiedCode(''), 2000)
+    })
+  }
+
+  const handleCreateInvite = async () => {
+    try {
+      const invite = await api.createInvite(server.id)
+      setInvites((prev) => [invite, ...prev])
+      copyToClipboard(invite.code)
+    } catch (e) {
+      console.error('Failed to create invite:', e)
+    }
+  }
+
+  const handleDeleteInvite = async (id: string) => {
+    try {
+      await api.deleteInvite(id)
+      setInvites((prev) => prev.filter((i) => i.id !== id))
+    } catch (e) {
+      console.error('Failed to delete invite:', e)
+    }
+  }
 
   const handleSave = async () => {
     if (!name.trim() || name === server.name) return
@@ -81,6 +122,33 @@ export default function ServerSettings({ server, onClose, onServerUpdated, onSer
 
           <h3 className="settings-section">Owner</h3>
           <p className="settings-value">{isOwner ? 'You' : server.owner_id.slice(0, 8)}</p>
+
+          <h3 className="settings-section">Invites</h3>
+          <button className="create-invite-btn" onClick={handleCreateInvite}>Generate Invite Code</button>
+          {invites.length > 0 && (
+            <div className="invite-list">
+              {invites.map((inv) => (
+                <div key={inv.id} className="invite-item">
+                  <code
+                    className="invite-code clickable"
+                    onClick={() => copyToClipboard(inv.code)}
+                    title="Click to copy"
+                  >
+                    {inv.code}
+                  </code>
+                  <span className="invite-uses">
+                    {inv.uses}{inv.max_uses > 0 ? `/${inv.max_uses}` : ''} uses
+                  </span>
+                  <span className="invite-copied-indicator">
+                    {copiedCode === inv.code ? '✓ Copied!' : ''}
+                  </span>
+                  <button className="invite-delete" onClick={() => handleDeleteInvite(inv.id)} title="Delete invite">
+                    🗑
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="settings-actions">
             {isOwner ? (

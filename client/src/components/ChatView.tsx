@@ -690,6 +690,10 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                       className="message-author clickable"
                       style={(m.user_id === user?.id && user?.name_color) ? { color: user.name_color } : m.author?.name_color ? { color: m.author.name_color } : undefined}
                       onClick={(e) => {
+                      if (popover?.userId === m.user_id) {
+                        setPopover(null)
+                        return
+                      }
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
                       setPopover({ userId: m.user_id, rect })
                     }}>{m.user_id === user?.id ? (user?.display_name ?? m.author?.display_name ?? m.user_id) : (m.author?.display_name ?? m.user_id)}</span>

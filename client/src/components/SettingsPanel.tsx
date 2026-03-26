@@ -15,7 +15,7 @@ const COLOR_PRESETS = [
 ]
 
 export default function SettingsPanel({ onClose }: Props) {
-  const { user, updateUser } = useAuth()
+  const { user, updateUser, logout } = useAuth()
   const [settings, setSettings] = useState<MediaSettings>(getSettings)
   const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([])
   const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([])
@@ -271,6 +271,9 @@ export default function SettingsPanel({ onClose }: Props) {
             </div>
           )
         )}
+        <div className="settings-logout-section">
+          <button className="danger-btn settings-logout-btn" onClick={logout}>Log Out</button>
+        </div>
       </div>
     </div>
   )

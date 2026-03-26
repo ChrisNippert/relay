@@ -8,13 +8,18 @@ interface Props {
   anchorRect: DOMRect
   onClose: () => void
   onMessage?: (userId: string) => void
+  serverId?: string
+  memberRole?: string
+  isAdmin?: boolean
+  onRoleChanged?: (userId: string, newRole: string) => void
 }
 
-export default function UserPopover({ userId, anchorRect, onClose, onMessage }: Props) {
+export default function UserPopover({ userId, anchorRect, onClose, onMessage, serverId, memberRole, isAdmin, onRoleChanged }: Props) {
   const { user: me } = useAuth()
   const [userInfo, setUserInfo] = useState<User | null>(null)
   const [friendship, setFriendship] = useState<Friendship | null>(null)
   const [loading, setLoading] = useState(true)
+  const [currentRole, setCurrentRole] = useState(memberRole)
   const popoverRef = useRef<HTMLDivElement>(null)
 
   const isSelf = userId === me?.id
@@ -89,6 +94,16 @@ export default function UserPopover({ userId, anchorRect, onClose, onMessage }: 
     }
   }
 
+  const handleToggleAdmin = async () => {
+    if (!serverId || !currentRole) return
+    const newRole = currentRole === 'admin' ? 'member' : 'admin'
+    try {
+      await api.updateMemberRole(serverId, userId, newRole)
+      setCurrentRole(newRole)
+      onRoleChanged?.(userId, newRole)
+    } catch { /* ignore */ }
+  }
+
   let friendStatus: 'none' | 'pending-sent' | 'pending-received' | 'accepted' = 'none'
   if (friendship) {
     if (friendship.status === 'accepted') {
@@ -158,6 +173,14 @@ export default function UserPopover({ userId, anchorRect, onClose, onMessage }: 
               {friendStatus === 'accepted' && (
                 <button className="user-popover-btn friends" disabled>
                   ✓ Friends
+                </button>
+              )}
+              {isAdmin && serverId && currentRole && (
+                <button
+                  className={`user-popover-btn ${currentRole === 'admin' ? 'admin-remove' : 'admin-add'}`}
+                  onClick={handleToggleAdmin}
+                >
+                  {currentRole === 'admin' ? '★ Remove Admin' : '☆ Make Admin'}
                 </button>
               )}
             </div>

@@ -78,18 +78,12 @@ export default function MembersSidebar({ serverId, onMessage, isAdmin }: Members
   }, [])
 
   const handleMemberClick = (userId: string, e: React.MouseEvent) => {
+    if (popover?.userId === userId) {
+      setPopover(null)
+      return
+    }
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     setPopover({ userId, rect })
-  }
-
-  const handleToggleAdmin = async (userId: string, currentRole: string) => {
-    const newRole = currentRole === 'admin' ? 'member' : 'admin'
-    try {
-      await api.updateMemberRole(serverId, userId, newRole)
-      setMembers((prev) => prev.map((m) =>
-        m.user.id === userId ? { ...m, member: { ...m.member, role: newRole } } : m
-      ))
-    } catch { /* ignore */ }
   }
 
   // Sort: online first, then alphabetical
@@ -118,15 +112,7 @@ export default function MembersSidebar({ serverId, onMessage, isAdmin }: Members
         >
           {m.user.display_name}
         </span>
-        {isAdmin && (
-          <button
-            className={`member-role-btn ${m.member.role === 'admin' ? 'is-admin' : ''}`}
-            title={m.member.role === 'admin' ? 'Remove admin' : 'Make admin'}
-            onClick={(e) => { e.stopPropagation(); handleToggleAdmin(m.user.id, m.member.role) }}
-          >
-            {m.member.role === 'admin' ? '★' : '☆'}
-          </button>
-        )}
+        {m.member.role === 'admin' && <span className="member-admin-badge" title="Admin">★</span>}
       </div>
     )
   }
@@ -152,6 +138,14 @@ export default function MembersSidebar({ serverId, onMessage, isAdmin }: Members
           anchorRect={popover.rect}
           onClose={() => setPopover(null)}
           onMessage={onMessage}
+          serverId={serverId}
+          memberRole={members.find((m) => m.user.id === popover.userId)?.member.role}
+          isAdmin={isAdmin}
+          onRoleChanged={(userId, newRole) => {
+            setMembers((prev) => prev.map((m) =>
+              m.user.id === userId ? { ...m, member: { ...m.member, role: newRole } } : m
+            ))
+          }}
         />
       )}
     </div>
