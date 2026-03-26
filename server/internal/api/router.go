@@ -39,6 +39,9 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 	r.Get("/ws", ws.HandleWebSocket(hub, cfg))
 	r.Get("/api/ws", ws.HandleWebSocket(hub, cfg))
 
+	// File downloads (public — UUIDs are unguessable)
+	r.Get("/api/files/{fileID}", DownloadHandler(cfg))
+
 	// Authenticated routes
 	r.Group(func(r chi.Router) {
 		r.Use(AuthMiddleware(cfg))
@@ -97,7 +100,6 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 
 		// File upload
 		r.Post("/api/upload", UploadHandler(cfg, database))
-		r.Get("/api/files/{fileID}", DownloadHandler(cfg))
 	})
 
 	return r

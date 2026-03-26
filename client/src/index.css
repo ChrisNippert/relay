@@ -686,6 +686,24 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   height: 100%;
+  position: relative;
+}
+
+.chat-view.drag-over::after {
+  content: 'Drop files here';
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(88, 101, 242, 0.12);
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--accent);
+  pointer-events: none;
 }
 
 .chat-header {
@@ -826,6 +844,38 @@ html, body, #root {
   padding: 1px 5px;
   font-size: 0.88em;
   font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+/* Code blocks (triple backtick) */
+.code-block {
+  position: relative;
+  background: #282c34;
+  border-radius: 6px;
+  margin: 6px 0;
+  padding: 10px 14px;
+  overflow-x: auto;
+  font-size: 0.88em;
+}
+
+.code-block code {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  white-space: pre;
+  background: none;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+}
+
+.code-block-lang {
+  position: absolute;
+  top: 5px;
+  right: 10px;
+  font-size: 0.72em;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  pointer-events: none;
 }
 
 /* Loading older messages */
@@ -1694,6 +1744,31 @@ html, body, #root {
   color: var(--danger);
 }
 
+.pending-file-progress {
+  font-size: 0.75rem;
+  color: var(--accent);
+  animation: pulse 1.2s infinite;
+}
+
+.pending-file-done {
+  color: #43b581;
+  font-weight: 700;
+}
+
+.pending-file-error {
+  border: 1px solid var(--danger);
+}
+
+.pending-file-error-text {
+  font-size: 0.75rem;
+  color: var(--danger);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
 /* Message attachments */
 .message-attachments {
   margin-top: 6px;
@@ -1707,6 +1782,16 @@ html, body, #root {
   max-height: 300px;
   border-radius: 8px;
   cursor: pointer;
+}
+
+.attachment-video {
+  max-width: 480px;
+  max-height: 360px;
+  border-radius: 8px;
+}
+
+.attachment-audio {
+  max-width: 400px;
 }
 
 .attachment-link {

@@ -114,18 +114,54 @@ export const setChannelKey = (channelId: string, encrypted_key: string) =>
   request<void>('POST', `/channels/${encodeURIComponent(channelId)}/keys`, { encrypted_key })
 
 // File upload
-export async function uploadFile(file: File): Promise<{ id: string; filename: string }> {
-  const form = new FormData()
-  form.append('file', file)
+const MAX_UPLOAD_MB = 50
 
-  const res = await fetch(`${BASE}/upload`, {
-    method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: form,
+export function uploadFile(
+  file: File,
+  onProgress?: (pct: number) => void
+): Promise<{ id: string; filename: string }> {
+  const sizeMB = file.size / 1024 / 1024
+  if (sizeMB > MAX_UPLOAD_MB) {
+    return Promise.reject(new Error(`File too large (${sizeMB.toFixed(1)} MB) — max is ${MAX_UPLOAD_MB} MB`))
+  }
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    const form = new FormData()
+    form.append('file', file)
+
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress(Math.round((e.loaded / e.total) * 100))
+      }
+    })
+
+    xhr.addEventListener('load', () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText))
+        } catch {
+          reject(new Error('Invalid response from server'))
+        }
+      } else {
+        let msg = xhr.responseText
+        try { const p = JSON.parse(msg); if (p.error) msg = p.error } catch {}
+        reject(new Error(msg || `Upload failed (HTTP ${xhr.status})`))
+      }
+    })
+
+    xhr.addEventListener('error', () => {
+      reject(new Error(`Network error uploading ${file.name} (${sizeMB.toFixed(1)} MB)`))
+    })
+
+    xhr.addEventListener('abort', () => {
+      reject(new Error('Upload cancelled'))
+    })
+
+    xhr.open('POST', `${BASE}/upload`)
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.send(form)
   })
-
-  if (!res.ok) throw new Error(await res.text())
-  return res.json()
 }
 
 export const fileURL = (fileId: string) => `${BASE}/files/${encodeURIComponent(fileId)}`

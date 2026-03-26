@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, type FormEvent, type ChangeEvent } from 'react'
 import type { Channel, Message, MessageEdit, User, ServerMember, WSMessage as WSMsg } from '../types'
 import * as api from '../services/api'
+import hljs from 'highlight.js'
 import { sendChatMessage, sendTypingStart, sendTypingStop, sendEditMessage, sendDeleteMessage, subscribe } from '../services/ws'
 import { useAuth } from '../context/AuthContext'
 
@@ -45,30 +46,68 @@ function renderFormattedText(text: string, keyPrefix: string): (string | React.R
   })
 }
 
+function renderCodeBlock(lang: string, code: string, key: string): React.ReactElement {
+  let highlighted: string
+  try {
+    if (lang && hljs.getLanguage(lang)) {
+      highlighted = hljs.highlight(code, { language: lang }).value
+    } else {
+      highlighted = hljs.highlightAuto(code).value
+    }
+  } catch {
+    highlighted = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  }
+  return (
+    <pre key={key} className="code-block">
+      {lang && <span className="code-block-lang">{lang}</span>}
+      <code dangerouslySetInnerHTML={{ __html: highlighted }} />
+    </pre>
+  )
+}
+
 function renderMessageContent(content: string) {
-  // Split by URLs, then by newlines, and preserve <br> for newlines
-  const parts = content.split(URL_REGEX)
-  const urls = content.match(URL_REGEX) || []
   const result: (string | React.ReactElement)[] = []
+  // Split on triple-backtick code blocks first
+  const CODE_BLOCK_REGEX = /```([\w]*)?\n?([\s\S]*?)```/g
+  let lastIndex = 0
+  let blockIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = CODE_BLOCK_REGEX.exec(content)) !== null) {
+    const before = content.slice(lastIndex, match.index)
+    if (before) renderInlineContent(before, `pre${blockIndex}`, result)
+    const lang = (match[1] ?? '').trim()
+    const code = match[2] ?? ''
+    result.push(renderCodeBlock(lang, code, `cb${blockIndex}`))
+    lastIndex = match.index + match[0].length
+    blockIndex++
+  }
+  const remaining = content.slice(lastIndex)
+  if (remaining) renderInlineContent(remaining, `pre${blockIndex}`, result)
+  return result
+}
+
+function renderInlineContent(text: string, keyPrefix: string, result: (string | React.ReactElement)[]) {
+  // Split by URLs, then by newlines
+  const parts = text.split(URL_REGEX)
+  const urls = text.match(URL_REGEX) || []
 
   parts.forEach((part, i) => {
     if (part) {
-      // Split by newlines and interleave <br />
       const lines = part.split(/\n/)
       lines.forEach((line, j) => {
-        if (line) result.push(...renderFormattedText(line, `f${i}-${j}`))
-        if (j < lines.length - 1) result.push(<br key={`br-${i}-${j}`} />)
+        if (line) result.push(...renderFormattedText(line, `${keyPrefix}-f${i}-${j}`))
+        if (j < lines.length - 1) result.push(<br key={`${keyPrefix}-br-${i}-${j}`} />)
       })
     }
     if (urls[i]) {
       result.push(
-        <a key={`u${i}`} href={urls[i]} target="_blank" rel="noreferrer noopener" className="message-link">
+        <a key={`${keyPrefix}-u${i}`} href={urls[i]} target="_blank" rel="noreferrer noopener" className="message-link">
           {urls[i]}
         </a>
       )
     }
   })
-  return result
 }
 
 export default function ChatView({ channel, onStartCall }: Props) {
@@ -77,12 +116,14 @@ export default function ChatView({ channel, onStartCall }: Props) {
   const [input, setInput] = useState('')
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map())
   const [dmPartnerId, setDmPartnerId] = useState<string | null>(null)
-  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [pendingFiles, setPendingFiles] = useState<{file: File; id?: string; progress: number; error?: string}[]>([])
   const [uploading, setUploading] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [hasMore, setHasMore] = useState(true)
   const [replyingTo, setReplyingTo] = useState<Message | null>(null)
   const [editingMsg, setEditingMsg] = useState<Message | null>(null)
+  const [dragging, setDragging] = useState(false)
+  const dragCounter = useRef(0)
   const [historyMsg, setHistoryMsg] = useState<Message | null>(null)
   const [editHistory, setEditHistory] = useState<MessageEdit[]>([])
   const [mentionUsers, setMentionUsers] = useState<User[]>([])
@@ -283,26 +324,26 @@ export default function ChatView({ channel, onStartCall }: Props) {
       return
     }
 
-    let attachmentIds: string[] = []
-    if (pendingFiles.length > 0) {
+    // Wait for any still-uploading files
+    const stillUploading = pendingFiles.some(f => !f.id && !f.error)
+    if (stillUploading) {
       setUploading(true)
-      try {
-        for (const file of pendingFiles) {
-          const res = await api.uploadFile(file)
-          attachmentIds.push(res.id)
-        }
-      } catch (err) {
-        console.error('Upload failed:', err)
-      }
-      setUploading(false)
-      setPendingFiles([])
+      return // user will retry; uploads finish in background
     }
+
+    const attachmentIds = pendingFiles.filter(f => f.id).map(f => f.id!)
+    setPendingFiles([])
+    setUploading(false)
+
+    // Don't send if there's no text and no successful uploads
+    if (!text && attachmentIds.length === 0) return
 
     sendChatMessage(channel.id, text || ' ', undefined, attachmentIds.length ? attachmentIds : undefined, replyingTo?.id)
     setReplyingTo(null)
     setInput('')
     sendTypingStop(channel.id)
     clearTimeout(typingTimerRef.current)
+    setTimeout(() => inputRef.current?.focus(), 0)
   }
 
   // Pre-fill input when entering edit mode
@@ -339,11 +380,61 @@ export default function ChatView({ channel, onStartCall }: Props) {
     }
   }
 
+  const startUpload = useCallback((files: File[]) => {
+    const newEntries = files.map(file => ({ file, progress: 0 }))
+    setPendingFiles(prev => {
+      const updated = [...prev, ...newEntries]
+      // Kick off uploads for the new entries
+      newEntries.forEach((entry, offset) => {
+        const idx = prev.length + offset
+        api.uploadFile(entry.file, (pct) => {
+          setPendingFiles(cur => cur.map((f, i) => i === idx ? { ...f, progress: pct } : f))
+        }).then(res => {
+          setPendingFiles(cur => cur.map((f, i) => i === idx ? { ...f, id: res.id, progress: 100 } : f))
+        }).catch((err) => {
+          const msg = err?.message || 'Upload failed'
+          console.error('Upload error:', msg)
+          setPendingFiles(cur => cur.map((f, i) => i === idx ? { ...f, error: msg, progress: 0 } : f))
+        })
+      })
+      return updated
+    })
+  }, [])
+
   const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setPendingFiles((prev) => [...prev, ...Array.from(e.target.files!)])
+    if (e.target.files && e.target.files.length > 0) {
+      startUpload(Array.from(e.target.files))
     }
     e.target.value = ''
+  }
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounter.current++
+    if (e.dataTransfer.types.includes('Files')) setDragging(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    dragCounter.current--
+    if (dragCounter.current === 0) setDragging(false)
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragging(false)
+    dragCounter.current = 0
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      startUpload(Array.from(e.dataTransfer.files))
+    }
   }
 
   const removePendingFile = (index: number) => {
@@ -374,7 +465,12 @@ export default function ChatView({ channel, onStartCall }: Props) {
   }
 
   return (
-    <div className="chat-view">
+    <div className={`chat-view${dragging ? ' drag-over' : ''}`}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
       <div className="chat-header">
         <span className="chat-header-name">
           {channel.server_id ? '#' : '💬'} {channel.name}
@@ -470,11 +566,20 @@ export default function ChatView({ channel, onStartCall }: Props) {
                   <div className="message-attachments">
                     {m.attachments.map((a) => {
                       const isImage = /^image\//i.test(a.mime_type)
-                      return isImage ? (
+                      const isVideo = /^video\//i.test(a.mime_type)
+                      const isAudio = /^audio\//i.test(a.mime_type)
+                      if (isImage) return (
                         <a key={a.id} href={api.fileURL(a.id)} target="_blank" rel="noreferrer">
                           <img src={api.fileURL(a.id)} alt={a.filename} className="attachment-image" />
                         </a>
-                      ) : (
+                      )
+                      if (isVideo) return (
+                        <video key={a.id} src={api.fileURL(a.id)} controls className="attachment-video" />
+                      )
+                      if (isAudio) return (
+                        <audio key={a.id} src={api.fileURL(a.id)} controls className="attachment-audio" />
+                      )
+                      return (
                         <a key={a.id} href={api.fileURL(a.id)} target="_blank" rel="noreferrer" className="attachment-link">
                           📎 {a.filename} ({(a.file_size / 1024).toFixed(1)} KB)
                         </a>
@@ -530,8 +635,13 @@ export default function ChatView({ channel, onStartCall }: Props) {
       {pendingFiles.length > 0 && (
         <div className="pending-files">
           {pendingFiles.map((f, i) => (
-            <div key={i} className="pending-file">
-              <span className="pending-file-name">📎 {f.name}</span>
+            <div key={i} className={`pending-file${f.error ? ' pending-file-error' : ''}`}>
+              <span className="pending-file-name">📎 {f.file.name}</span>
+              {!f.id && !f.error && (
+                <span className="pending-file-progress">{f.progress > 0 ? `${f.progress}%` : 'uploading…'}</span>
+              )}
+              {f.id && <span className="pending-file-done">✓</span>}
+              {f.error && <span className="pending-file-error-text">{f.error}</span>}
               <button className="pending-file-remove" onClick={() => removePendingFile(i)}>×</button>
             </div>
           ))}
@@ -550,7 +660,7 @@ export default function ChatView({ channel, onStartCall }: Props) {
           </div>
         )}
         <form className="message-input" onSubmit={handleSend}>
-          <input type="file" ref={fileInputRef} onChange={handleFileSelect} multiple hidden />
+          <input type="file" ref={fileInputRef} onChange={handleFileSelect} multiple style={{ display: 'none' }} />
           <button type="button" className="upload-btn" onClick={() => fileInputRef.current?.click()} title="Upload file">
             📎
           </button>
@@ -564,13 +674,15 @@ export default function ChatView({ channel, onStartCall }: Props) {
             className="message-textarea"
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) {
+                // If there's an unclosed code block (odd number of ```), Enter = newline
+                const backtickCount = (input.match(/```/g) || []).length
+                if (backtickCount % 2 !== 0) return
                 e.preventDefault();
-                (e.target as HTMLTextAreaElement).blur();
                 handleSend(e as unknown as FormEvent);
               }
             }}
           />
-          <button type="submit" disabled={uploading}>{uploading ? '...' : editingMsg ? 'Save' : 'Send'}</button>
+          <button type="submit" disabled={uploading || pendingFiles.some(f => !f.id && !f.error)}>{pendingFiles.some(f => !f.id && !f.error) ? 'Uploading…' : editingMsg ? 'Save' : 'Send'}</button>
         </form>
       </div>
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -18,10 +19,21 @@ import (
 func UploadHandler(cfg *config.Config, database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		maxBytes := int64(cfg.MaxUploadMB) * 1024 * 1024
+
+		// Early rejection based on Content-Length before reading body
+		if r.ContentLength > maxBytes {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			w.Write([]byte(`{"error":"file too large (max ` + fmt.Sprintf("%d", cfg.MaxUploadMB) + ` MB)"}`))
+			return
+		}
+
 		r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 
 		if err := r.ParseMultipartForm(maxBytes); err != nil {
-			http.Error(w, `{"error":"file too large"}`, http.StatusRequestEntityTooLarge)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			w.Write([]byte(`{"error":"file too large (max ` + fmt.Sprintf("%d", cfg.MaxUploadMB) + ` MB)"}`))
 			return
 		}
 
