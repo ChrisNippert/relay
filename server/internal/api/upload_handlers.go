@@ -12,9 +12,10 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/relay-chat/relay/internal/config"
+	"github.com/relay-chat/relay/internal/db"
 )
 
-func UploadHandler(cfg *config.Config) http.HandlerFunc {
+func UploadHandler(cfg *config.Config, database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		maxBytes := int64(cfg.MaxUploadMB) * 1024 * 1024
 		r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
@@ -54,11 +55,15 @@ func UploadHandler(cfg *config.Config) http.HandlerFunc {
 			return
 		}
 
+		mimeType := header.Header.Get("Content-Type")
+		// Create attachment record (with empty message_id, will be linked later)
+		database.CreateAttachment(fileID, "", header.Filename, destPath, header.Size, mimeType)
+
 		resp := map[string]interface{}{
 			"id":        fileID,
 			"filename":  header.Filename,
 			"file_size": header.Size,
-			"mime_type": header.Header.Get("Content-Type"),
+			"mime_type": mimeType,
 			"url":       "/api/files/" + fileID,
 		}
 

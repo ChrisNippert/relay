@@ -10,18 +10,20 @@ import (
 
 type Hub struct {
 	db         *db.DB
-	clients    map[string]*Client // userID -> Client
-	register   chan *Client
-	unregister chan *Client
-	mu         sync.RWMutex
+	clients       map[string]*Client          // userID -> Client
+	voiceChannels map[string]map[string]bool   // channelID -> set of userIDs
+	register      chan *Client
+	unregister    chan *Client
+	mu            sync.RWMutex
 }
 
 func NewHub(database *db.DB) *Hub {
 	return &Hub{
 		db:         database,
-		clients:    make(map[string]*Client),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
+		clients:       make(map[string]*Client),
+		voiceChannels: make(map[string]map[string]bool),
+		register:      make(chan *Client),
+		unregister:    make(chan *Client),
 	}
 }
 
@@ -52,6 +54,7 @@ func (h *Hub) Run() {
 			log.Printf("User %s disconnected", client.userID)
 			h.db.UpdateUserStatus(client.userID, "offline")
 			h.broadcastPresence(client.userID, "offline")
+			HandleDisconnect(h, client.userID)
 		}
 	}
 }
@@ -125,6 +128,61 @@ func (h *Hub) SendToChannel(channelID string, data []byte, excludeUserID string)
 			}
 		}
 	}
+}
+
+// VoiceJoin adds a user to a voice channel and returns the list of users in it.
+func (h *Hub) VoiceJoin(channelID, userID string) []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.voiceChannels[channelID] == nil {
+		h.voiceChannels[channelID] = make(map[string]bool)
+	}
+	h.voiceChannels[channelID][userID] = true
+	var users []string
+	for uid := range h.voiceChannels[channelID] {
+		users = append(users, uid)
+	}
+	return users
+}
+
+// VoiceLeave removes a user from a voice channel.
+func (h *Hub) VoiceLeave(channelID, userID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.voiceChannels[channelID] != nil {
+		delete(h.voiceChannels[channelID], userID)
+		if len(h.voiceChannels[channelID]) == 0 {
+			delete(h.voiceChannels, channelID)
+		}
+	}
+}
+
+// VoiceUsers returns the list of users in a voice channel.
+func (h *Hub) VoiceUsers(channelID string) []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	var users []string
+	for uid := range h.voiceChannels[channelID] {
+		users = append(users, uid)
+	}
+	return users
+}
+
+// VoiceLeaveAll removes a user from all voice channels (on disconnect).
+func (h *Hub) VoiceLeaveAll(userID string) []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var channels []string
+	for chID, users := range h.voiceChannels {
+		if users[userID] {
+			delete(users, userID)
+			channels = append(channels, chID)
+			if len(users) == 0 {
+				delete(h.voiceChannels, chID)
+			}
+		}
+	}
+	return channels
 }
 
 func mustMarshal(v interface{}) []byte {

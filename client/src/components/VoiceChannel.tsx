@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback, useImperativeHandle, forwardRef } from 'react'
 import type { Channel, WSMessage as WSMsg } from '../types'
 import { useAuth } from '../context/AuthContext'
-import { subscribe, sendCallOffer, sendCallAnswer, sendIceCandidate, sendCallEnd } from '../services/ws'
+import { subscribe, sendCallOffer, sendCallAnswer, sendIceCandidate, sendCallEnd, sendVoiceJoin, sendVoiceLeave } from '../services/ws'
 import { PeerConnection } from '../services/webrtc'
 import * as api from '../services/api'
 import { playJoinSound, playLeaveSound, playConnectedSound, playDisconnectedSound, playCallRing, playErrorSound } from '../services/sounds'
@@ -9,6 +9,22 @@ import { getSettings } from '../services/settings'
 
 interface Props {
   channel: Channel
+  autoJoin?: boolean
+  onJoin?: () => void
+  onLeave?: () => void
+}
+
+export interface VoiceChannelHandle {
+  toggleMute: () => void
+  toggleDeafen: () => void
+  toggleVideo: () => void
+  toggleScreenShare: () => void
+  leaveVoice: () => void
+  muted: boolean
+  deafened: boolean
+  videoOn: boolean
+  screenSharing: boolean
+  joined: boolean
 }
 
 interface VoiceUser {
@@ -17,9 +33,10 @@ interface VoiceUser {
   isSelf: boolean
   hasVideo: boolean
   hasScreen: boolean
+  speaking: boolean
 }
 
-export default function VoiceChannel({ channel }: Props) {
+export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ channel, autoJoin, onJoin, onLeave }, ref) {
   const { user } = useAuth()
   const [joined, setJoined] = useState(false)
   const [voiceUsers, setVoiceUsers] = useState<VoiceUser[]>([])
@@ -29,12 +46,20 @@ export default function VoiceChannel({ channel }: Props) {
   const [screenSharing, setScreenSharing] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const [members, setMembers] = useState<Map<string, string>>(new Map())
+  const [, setChannelVoiceUsers] = useState<string[]>([])
+  const [, setLocalSpeaking] = useState(false)
+  const [focusedUser, setFocusedUser] = useState<string | null>(null)
+  const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map())
 
   const peersRef = useRef<Map<string, PeerConnection>>(new Map())
   const localStreamRef = useRef<MediaStream | null>(null)
   const localVideoRef = useRef<HTMLVideoElement>(null)
+  const localScreenRef = useRef<HTMLVideoElement>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
-  const remoteMediaRef = useRef<HTMLDivElement>(null)
+  const remoteAudioRef = useRef<HTMLDivElement>(null)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const speakingAnimRef = useRef<number>(0)
 
   // Load server members for display names
   useEffect(() => {
@@ -51,6 +76,26 @@ export default function VoiceChannel({ channel }: Props) {
       }).catch(console.error)
     }
   }, [channel.server_id])
+
+  // Fetch initial voice state
+  useEffect(() => {
+    api.getVoiceUsers(channel.id).then((userIds) => {
+      setChannelVoiceUsers(userIds || [])
+    }).catch(() => {})
+  }, [channel.id])
+
+  // Listen for voice state updates
+  useEffect(() => {
+    const unsub = subscribe((msg: WSMsg) => {
+      if (msg.type === 'voice_state') {
+        const payload = msg.payload as { channel_id: string; user_ids: string[] }
+        if (payload.channel_id === channel.id) {
+          setChannelVoiceUsers(payload.user_ids || [])
+        }
+      }
+    })
+    return unsub
+  }, [channel.id])
 
   // Listen for WebRTC signaling
   useEffect(() => {
@@ -84,7 +129,67 @@ export default function VoiceChannel({ channel }: Props) {
     return unsub
   }, [joined, channel.id])
 
-  const getName = (userId: string) => members.get(userId) ?? userId.slice(0, 8)
+  // Expose controls to parent via ref
+  useImperativeHandle(ref, () => ({
+    toggleMute: () => toggleMute(),
+    toggleDeafen: () => toggleDeafen(),
+    toggleVideo: () => toggleVideo(),
+    toggleScreenShare: () => toggleScreenShare(),
+    leaveVoice: () => leaveVoice(),
+    muted,
+    deafened,
+    videoOn,
+    screenSharing,
+    joined,
+  }))
+
+  // Auto-join when prop is set
+  const autoJoinedRef = useRef(false)
+  useEffect(() => {
+    if (autoJoin && !joined && !connecting && !autoJoinedRef.current) {
+      autoJoinedRef.current = true
+      joinVoice()
+    }
+  }, [autoJoin])
+
+  const getName = useCallback((userId: string) => members.get(userId) ?? userId.slice(0, 8), [members])
+
+  // Voice activity detection for local mic
+  function startVoiceActivityDetection(stream: MediaStream) {
+    try {
+      const ctx = new AudioContext()
+      audioContextRef.current = ctx
+      const source = ctx.createMediaStreamSource(stream)
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 512
+      analyser.smoothingTimeConstant = 0.4
+      source.connect(analyser)
+      analyserRef.current = analyser
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+      const check = () => {
+        analyser.getByteFrequencyData(dataArray)
+        let sum = 0
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i]!
+        const avg = sum / dataArray.length
+        const isSpeaking = avg > 15
+        setLocalSpeaking(isSpeaking)
+        setVoiceUsers((prev) =>
+          prev.map((u) => u.isSelf ? { ...u, speaking: isSpeaking } : u)
+        )
+        speakingAnimRef.current = requestAnimationFrame(check)
+      }
+      check()
+    } catch { /* AudioContext not supported */ }
+  }
+
+  function stopVoiceActivityDetection() {
+    cancelAnimationFrame(speakingAnimRef.current)
+    analyserRef.current = null
+    audioContextRef.current?.close()
+    audioContextRef.current = null
+    setLocalSpeaking(false)
+  }
 
   function getAudioConstraints(): MediaTrackConstraints | boolean {
     const settings = getSettings()
@@ -100,15 +205,19 @@ export default function VoiceChannel({ channel }: Props) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: getAudioConstraints(), video: false })
       localStreamRef.current = stream
       setJoined(true)
-      setVoiceUsers([{ id: user.id, displayName: user.display_name, isSelf: true, hasVideo: false, hasScreen: false }])
+      setVoiceUsers([{ id: user.id, displayName: user.display_name, isSelf: true, hasVideo: false, hasScreen: false, speaking: false }])
       playJoinSound()
+      startVoiceActivityDetection(stream)
+      onJoin?.()
 
-      if (channel.server_id) {
-        const serverMembers = await api.getMembers(channel.server_id)
-        for (const m of serverMembers) {
-          if (m.user_id === user.id) continue
-          await initiateCall(m.user_id, stream)
-        }
+      // Tell server we joined voice
+      sendVoiceJoin(channel.id)
+
+      // Get current voice users and initiate calls to them (only those already in voice)
+      const currentUsers = await api.getVoiceUsers(channel.id)
+      for (const uid of currentUsers) {
+        if (uid === user.id) continue
+        await initiateCall(uid, stream)
       }
     } catch (err) {
       console.error('Failed to get microphone:', err)
@@ -135,7 +244,7 @@ export default function VoiceChannel({ channel }: Props) {
       setVoiceUsers((prev) => {
         if (prev.some((u) => u.id === targetUserId)) return prev
         playConnectedSound()
-        return [...prev, { id: targetUserId, displayName: name, isSelf: false, hasVideo: false, hasScreen: false }]
+        return [...prev, { id: targetUserId, displayName: name, isSelf: false, hasVideo: false, hasScreen: false, speaking: false }]
       })
     }
 
@@ -174,7 +283,7 @@ export default function VoiceChannel({ channel }: Props) {
       setVoiceUsers((prev) => {
         if (prev.some((u) => u.id === fromUserId)) return prev
         playConnectedSound()
-        return [...prev, { id: fromUserId, displayName: name, isSelf: false, hasVideo: false, hasScreen: false }]
+        return [...prev, { id: fromUserId, displayName: name, isSelf: false, hasVideo: false, hasScreen: false, speaking: false }]
       })
     }
 
@@ -199,56 +308,51 @@ export default function VoiceChannel({ channel }: Props) {
       pc.close()
       peersRef.current.delete(userId)
     }
-    const el = document.getElementById(`remote-media-${userId}`)
+    const el = document.getElementById(`remote-audio-${userId}`)
     el?.remove()
+    setRemoteStreams((prev) => {
+      const next = new Map(prev)
+      next.delete(userId)
+      return next
+    })
     setVoiceUsers((prev) => prev.filter((u) => u.id !== userId))
     playLeaveSound()
   }
 
   function attachRemoteMedia(userId: string, stream: MediaStream) {
-    const existingEl = document.getElementById(`remote-media-${userId}`)
+    // Remove any existing audio-only element
+    const existingEl = document.getElementById(`remote-audio-${userId}`)
     if (existingEl) existingEl.remove()
 
     const settings = getSettings()
     const hasVideoTrack = stream.getVideoTracks().length > 0
 
     if (hasVideoTrack) {
-      const container = document.createElement('div')
-      container.id = `remote-media-${userId}`
-      container.className = 'video-tile'
-      const video = document.createElement('video')
-      video.srcObject = stream
-      video.autoplay = true
-      video.playsInline = true
-      video.volume = settings.outputVolume / 100
-      const nameLabel = document.createElement('span')
-      nameLabel.className = 'video-tile-name'
-      nameLabel.textContent = getName(userId)
-      container.appendChild(video)
-      container.appendChild(nameLabel)
-      remoteMediaRef.current?.appendChild(container)
+      // Store stream in React state so it renders in the user's tile
+      setRemoteStreams((prev) => {
+        const next = new Map(prev)
+        next.set(userId, stream)
+        return next
+      })
 
       setVoiceUsers((prev) =>
         prev.map((u) => u.id === userId ? { ...u, hasVideo: true } : u)
       )
-    } else {
-      const audio = document.createElement('audio')
-      audio.id = `remote-media-${userId}`
-      audio.srcObject = stream
-      audio.autoplay = true
-      audio.volume = settings.outputVolume / 100
-      audio.setAttribute('playsinline', '')
-      remoteMediaRef.current?.appendChild(audio)
     }
 
+    // Always create a hidden audio element for audio playback
+    const audio = document.createElement('audio')
+    audio.id = `remote-audio-${userId}`
+    audio.srcObject = stream
+    audio.autoplay = true
+    audio.volume = settings.outputVolume / 100
+    audio.setAttribute('playsinline', '')
+    remoteAudioRef.current?.appendChild(audio)
+
     // Set output device if supported
-    if (settings.audioOutputDevice) {
-      const el = document.getElementById(`remote-media-${userId}`)
-      const mediaEl = el?.tagName === 'DIV' ? el.querySelector('video') : el
-      if (mediaEl && 'setSinkId' in mediaEl) {
-        (mediaEl as HTMLMediaElement & { setSinkId: (id: string) => Promise<void> })
-          .setSinkId(settings.audioOutputDevice).catch(() => {})
-      }
+    if (settings.audioOutputDevice && 'setSinkId' in audio) {
+      (audio as HTMLAudioElement & { setSinkId: (id: string) => Promise<void> })
+        .setSinkId(settings.audioOutputDevice).catch(() => {})
     }
   }
 
@@ -259,21 +363,28 @@ export default function VoiceChannel({ channel }: Props) {
     }
     peersRef.current.clear()
 
+    stopVoiceActivityDetection()
+
     localStreamRef.current?.getTracks().forEach((t) => t.stop())
     localStreamRef.current = null
     screenStreamRef.current?.getTracks().forEach((t) => t.stop())
     screenStreamRef.current = null
 
-    if (remoteMediaRef.current) remoteMediaRef.current.innerHTML = ''
+    if (remoteAudioRef.current) remoteAudioRef.current.innerHTML = ''
     if (localVideoRef.current) localVideoRef.current.srcObject = null
+    if (localScreenRef.current) localScreenRef.current.srcObject = null
+
+    sendVoiceLeave(channel.id)
 
     setJoined(false)
     setVoiceUsers([])
+    setRemoteStreams(new Map())
     setMuted(false)
     setDeafened(false)
     setVideoOn(false)
     setScreenSharing(false)
     playDisconnectedSound()
+    onLeave?.()
   }
 
   function toggleMute() {
@@ -286,8 +397,8 @@ export default function VoiceChannel({ channel }: Props) {
 
   function toggleDeafen() {
     const newDeafened = !deafened
-    if (remoteMediaRef.current) {
-      const elems = remoteMediaRef.current.querySelectorAll('audio, video')
+    if (remoteAudioRef.current) {
+      const elems = remoteAudioRef.current.querySelectorAll('audio, video')
       elems.forEach((a) => { (a as HTMLMediaElement).muted = newDeafened })
     }
     setDeafened(newDeafened)
@@ -317,7 +428,7 @@ export default function VoiceChannel({ channel }: Props) {
         if (videoTrack && localStreamRef.current) {
           localStreamRef.current.addTrack(videoTrack)
           if (localVideoRef.current) {
-            localVideoRef.current.srcObject = new MediaStream([videoTrack])
+            localVideoRef.current.srcObject = localStreamRef.current
           }
           for (const pc of peersRef.current.values()) {
             pc.pc.addTrack(videoTrack, localStreamRef.current)
@@ -343,6 +454,7 @@ export default function VoiceChannel({ channel }: Props) {
         localStreamRef.current?.removeTrack(t)
       })
       screenStreamRef.current = null
+      if (localScreenRef.current) localScreenRef.current.srcObject = null
       setScreenSharing(false)
       setVoiceUsers((prev) =>
         prev.map((u) => u.id === user.id ? { ...u, hasScreen: false } : u)
@@ -352,6 +464,9 @@ export default function VoiceChannel({ channel }: Props) {
       try {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
         screenStreamRef.current = screenStream
+        if (localScreenRef.current) {
+          localScreenRef.current.srcObject = screenStream
+        }
         screenStream.getTracks().forEach((t) => {
           localStreamRef.current?.addTrack(t)
           for (const pc of peersRef.current.values()) {
@@ -363,6 +478,7 @@ export default function VoiceChannel({ channel }: Props) {
               prev.map((u) => u.id === user!.id ? { ...u, hasScreen: false } : u)
             )
             screenStreamRef.current = null
+            if (localScreenRef.current) localScreenRef.current.srcObject = null
           }
         })
         setScreenSharing(true)
@@ -387,92 +503,106 @@ export default function VoiceChannel({ channel }: Props) {
     }
   }
 
-  const anyoneHasVideo = voiceUsers.some((u) => u.hasVideo || u.hasScreen)
+  const hasFocused = focusedUser !== null && voiceUsers.some((u) => u.id === focusedUser)
+  const sortedUsers = hasFocused
+    ? [voiceUsers.find((u) => u.id === focusedUser)!, ...voiceUsers.filter((u) => u.id !== focusedUser)]
+    : voiceUsers
+
+  const handleTileClick = (userId: string) => {
+    setFocusedUser((prev) => prev === userId ? null : userId)
+  }
 
   return (
     <div className="voice-channel">
       <div className="voice-header">
         <span className="voice-header-name">🔊 {channel.name}</span>
         {joined && <span className="voice-status connected">Connected</span>}
+        {connecting && <span className="voice-status connecting">Connecting…</span>}
       </div>
 
-      {/* Video grid */}
-      {anyoneHasVideo && joined && (
-        <div className="video-grid">
-          {videoOn && (
-            <div className="video-tile self-video">
-              <video ref={localVideoRef} autoPlay playsInline muted />
-              <span className="video-tile-name">{user?.display_name} (you)</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="voice-users">
+      <div className={`voice-tile-grid ${hasFocused ? 'has-focused' : ''} count-${Math.min(voiceUsers.length, 16)}`}>
         {voiceUsers.length === 0 && !joined && (
           <p className="voice-empty">No one is in this channel</p>
         )}
-        {voiceUsers.map((vu) => (
-          <div key={vu.id} className={`voice-user ${vu.isSelf ? 'self' : ''} ${muted && vu.isSelf ? 'muted' : ''}`}>
-            <span className="voice-user-indicator">
-              {muted && vu.isSelf ? '🔇' : '🎙️'}
-              {vu.hasVideo ? ' 📷' : ''}
-              {vu.hasScreen ? ' 🖥️' : ''}
-            </span>
-            <span className="voice-user-name">{vu.displayName}</span>
-            {vu.isSelf && <span className="voice-user-tag">(you)</span>}
-          </div>
-        ))}
+        {sortedUsers.map((vu) => {
+          const hasMedia = vu.hasVideo || vu.hasScreen
+          const hasBoth = vu.hasVideo && vu.hasScreen
+          const remoteStream = remoteStreams.get(vu.id)
+
+          return (
+            <div
+              key={vu.id}
+              className={`voice-tile ${vu.speaking ? 'speaking' : ''} ${vu.isSelf ? 'is-self' : ''} ${muted && vu.isSelf ? 'is-muted' : ''} ${focusedUser === vu.id ? 'focused' : ''} ${hasFocused && focusedUser !== vu.id ? 'unfocused' : ''} ${hasMedia ? 'has-media' : ''}`}
+              onClick={() => handleTileClick(vu.id)}
+            >
+              {hasMedia ? (
+                <div className={`voice-tile-media ${hasBoth ? 'split' : ''}`}>
+                  {vu.hasScreen && (
+                    <div className="voice-tile-video-pane screen-pane">
+                      {vu.isSelf ? (
+                        <video ref={(el) => {
+                          localScreenRef.current = el
+                          if (el && screenStreamRef.current && el.srcObject !== screenStreamRef.current) {
+                            el.srcObject = screenStreamRef.current
+                          }
+                        }} autoPlay playsInline muted />
+                      ) : remoteStream ? (
+                        <video
+                          autoPlay
+                          playsInline
+                          ref={(el) => { if (el && el.srcObject !== remoteStream) el.srcObject = remoteStream }}
+                        />
+                      ) : null}
+                      <span className="voice-tile-pane-label">Screen</span>
+                    </div>
+                  )}
+                  {vu.hasVideo && (
+                    <div className={`voice-tile-video-pane camera-pane ${hasBoth ? 'secondary' : ''}`}>
+                      {vu.isSelf ? (
+                        <video ref={(el) => {
+                          localVideoRef.current = el
+                          if (el && localStreamRef.current && el.srcObject !== localStreamRef.current) {
+                            el.srcObject = localStreamRef.current
+                          }
+                        }} autoPlay playsInline muted />
+                      ) : remoteStream ? (
+                        <video
+                          autoPlay
+                          playsInline
+                          ref={(el) => { if (el && el.srcObject !== remoteStream) el.srcObject = remoteStream }}
+                        />
+                      ) : null}
+                      {hasBoth && <span className="voice-tile-pane-label">Camera</span>}
+                    </div>
+                  )}
+                  <div className="voice-tile-overlay">
+                    <span className="voice-tile-name">
+                      {vu.displayName}
+                      {vu.isSelf && <span className="voice-tile-tag"> (you)</span>}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <span className={`voice-tile-avatar ${vu.speaking ? 'speaking' : ''}`}>
+                    {vu.displayName.charAt(0).toUpperCase()}
+                  </span>
+                  <span className="voice-tile-name">
+                    {vu.displayName}
+                    {vu.isSelf && <span className="voice-tile-tag"> (you)</span>}
+                  </span>
+                  <div className="voice-tile-badges">
+                    {muted && vu.isSelf && <span className="voice-tile-badge muted" title="Muted">🔇</span>}
+                  </div>
+                </>
+              )}
+            </div>
+          )
+        })}
       </div>
 
-      <div className="voice-controls">
-        {!joined ? (
-          <button className="voice-join-btn" onClick={joinVoice} disabled={connecting}>
-            {connecting ? 'Connecting...' : 'Join Voice'}
-          </button>
-        ) : (
-          <div className="voice-buttons">
-            <button
-              className={`voice-ctrl-btn ${muted ? 'active' : ''}`}
-              onClick={toggleMute}
-              title={muted ? 'Unmute' : 'Mute'}
-            >
-              {muted ? '🔇' : '🎙️'}
-            </button>
-            <button
-              className={`voice-ctrl-btn ${deafened ? 'active' : ''}`}
-              onClick={toggleDeafen}
-              title={deafened ? 'Undeafen' : 'Deafen'}
-            >
-              {deafened ? '🔈' : '🔊'}
-            </button>
-            <button
-              className={`voice-ctrl-btn ${videoOn ? 'active' : ''}`}
-              onClick={toggleVideo}
-              title={videoOn ? 'Camera Off' : 'Camera On'}
-            >
-              📷
-            </button>
-            <button
-              className={`voice-ctrl-btn ${screenSharing ? 'active' : ''}`}
-              onClick={toggleScreenShare}
-              title={screenSharing ? 'Stop Sharing' : 'Share Screen'}
-            >
-              🖥️
-            </button>
-            <button className="voice-leave-btn" onClick={leaveVoice} title="Disconnect">
-              📞
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Container for remote media elements — visible when video is active */}
-      <div
-        ref={remoteMediaRef}
-        className={anyoneHasVideo ? 'video-grid remote-grid' : ''}
-        style={anyoneHasVideo ? {} : { display: 'none' }}
-      />
+      {/* Hidden container for remote audio elements */}
+      <div ref={remoteAudioRef} style={{ display: 'none' }} />
     </div>
   )
-}
+})

@@ -19,7 +19,7 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:*", "http://127.0.0.1:*"},
+		AllowedOrigins:   []string{"http://localhost:*", "http://127.0.0.1:*", "https://localhost:*", "https://127.0.0.1:*", "https://*:5173"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
 		AllowCredentials: true,
@@ -84,12 +84,15 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		// Messages
 		r.Get("/api/channels/{channelID}/messages", GetMessagesHandler(database))
 
+		// Voice state
+		r.Get("/api/channels/{channelID}/voice-users", GetVoiceUsersHandler(hub))
+
 		// Channel keys (E2E encryption)
 		r.Get("/api/channels/{channelID}/keys", GetChannelKeysHandler(database))
 		r.Post("/api/channels/{channelID}/keys", SetChannelKeyHandler(database))
 
 		// File upload
-		r.Post("/api/upload", UploadHandler(cfg))
+		r.Post("/api/upload", UploadHandler(cfg, database))
 		r.Get("/api/files/{fileID}", DownloadHandler(cfg))
 	})
 

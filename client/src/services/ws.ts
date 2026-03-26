@@ -74,8 +74,8 @@ export function subscribe(handler: MessageHandler): () => void {
 }
 
 // Convenience senders
-export function sendChatMessage(channelId: string, content: string, nonce?: string) {
-  send('chat_message', { channel_id: channelId, content, nonce, type: 'text' })
+export function sendChatMessage(channelId: string, content: string, nonce?: string, attachmentIds?: string[]) {
+  send('chat_message', { channel_id: channelId, content, nonce, type: 'text', attachment_ids: attachmentIds })
 }
 
 export function sendTypingStart(channelId: string) {
@@ -100,4 +100,12 @@ export function sendIceCandidate(targetUserId: string, channelId: string, signal
 
 export function sendCallEnd(targetUserId: string, channelId: string) {
   send('call_end', { target_user_id: targetUserId, channel_id: channelId })
+}
+
+export function sendVoiceJoin(channelId: string) {
+  send('voice_join', { channel_id: channelId })
+}
+
+export function sendVoiceLeave(channelId: string) {
+  send('voice_leave', { channel_id: channelId })
 }

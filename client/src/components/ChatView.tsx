@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type ChangeEvent } from 'react'
 import type { Channel, Message, WSMessage as WSMsg } from '../types'
 import * as api from '../services/api'
 import { sendChatMessage, sendTypingStart, sendTypingStop, subscribe } from '../services/ws'
@@ -9,14 +9,46 @@ interface Props {
   onStartCall?: (userId: string, video: boolean) => void
 }
 
+const URL_REGEX = /https?:\/\/[^\s<]+/g
+const IMAGE_EXT = /\.(jpg|jpeg|png|gif|webp)(\?.*)?$/i
+
+function extractUrls(text: string): string[] {
+  return text.match(URL_REGEX) || []
+}
+
+function isImageUrl(url: string): boolean {
+  return IMAGE_EXT.test(url)
+}
+
+function renderMessageContent(content: string) {
+  const parts = content.split(URL_REGEX)
+  const urls = content.match(URL_REGEX) || []
+  const result: (string | React.ReactElement)[] = []
+
+  parts.forEach((part, i) => {
+    if (part) result.push(part)
+    if (urls[i]) {
+      result.push(
+        <a key={i} href={urls[i]} target="_blank" rel="noreferrer noopener" className="message-link">
+          {urls[i]}
+        </a>
+      )
+    }
+  })
+  return result
+}
+
 export default function ChatView({ channel, onStartCall }: Props) {
   const { user } = useAuth()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set())
   const [dmPartnerId, setDmPartnerId] = useState<string | null>(null)
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [uploading, setUploading] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const typingTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Resolve DM partner for call buttons
   useEffect(() => {
@@ -88,14 +120,41 @@ export default function ChatView({ channel, onStartCall }: Props) {
     }
   }
 
-  const handleSend = (e: FormEvent) => {
+  const handleSend = async (e: FormEvent) => {
     e.preventDefault()
     const text = input.trim()
-    if (!text) return
-    sendChatMessage(channel.id, text)
+    if (!text && pendingFiles.length === 0) return
+
+    let attachmentIds: string[] = []
+    if (pendingFiles.length > 0) {
+      setUploading(true)
+      try {
+        for (const file of pendingFiles) {
+          const res = await api.uploadFile(file)
+          attachmentIds.push(res.id)
+        }
+      } catch (err) {
+        console.error('Upload failed:', err)
+      }
+      setUploading(false)
+      setPendingFiles([])
+    }
+
+    sendChatMessage(channel.id, text || ' ', undefined, attachmentIds.length ? attachmentIds : undefined)
     setInput('')
     sendTypingStop(channel.id)
     clearTimeout(typingTimerRef.current)
+  }
+
+  const handleFileSelect = (e: ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setPendingFiles((prev) => [...prev, ...Array.from(e.target.files!)])
+    }
+    e.target.value = ''
+  }
+
+  const removePendingFile = (index: number) => {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index))
   }
 
   const formatTime = (iso: string) => {
@@ -122,24 +181,55 @@ export default function ChatView({ channel, onStartCall }: Props) {
       </div>
 
       <div className="message-list">
-        {messages.map((m) => (
-          <div key={m.id} className={`message ${m.user_id === user?.id ? 'own' : ''}`}>
-            <div className="message-header">
-              <span className="message-author">{m.author?.display_name ?? m.user_id}</span>
-              <span className="message-time">{formatTime(m.created_at)}</span>
-            </div>
-            <div className="message-body">{m.content}</div>
-            {m.attachments && m.attachments.length > 0 && (
-              <div className="message-attachments">
-                {m.attachments.map((a) => (
-                  <a key={a.id} href={api.fileURL(a.id)} target="_blank" rel="noreferrer" className="attachment-link">
-                    📎 {a.filename} ({(a.file_size / 1024).toFixed(1)} KB)
-                  </a>
-                ))}
+        {messages.map((m) => {
+          const urls = extractUrls(m.content)
+          const embedImages = urls.filter(isImageUrl)
+          const embedLinks = urls.filter((u) => !isImageUrl(u))
+
+          return (
+            <div key={m.id} className={`message ${m.user_id === user?.id ? 'own' : ''}`}>
+              <div className="message-header">
+                <span className="message-author">{m.author?.display_name ?? m.user_id}</span>
+                <span className="message-time">{formatTime(m.created_at)}</span>
               </div>
-            )}
-          </div>
-        ))}
+              <div className="message-body">{renderMessageContent(m.content)}</div>
+              {m.attachments && m.attachments.length > 0 && (
+                <div className="message-attachments">
+                  {m.attachments.map((a) => {
+                    const isImage = /^image\//i.test(a.mime_type)
+                    return isImage ? (
+                      <a key={a.id} href={api.fileURL(a.id)} target="_blank" rel="noreferrer">
+                        <img src={api.fileURL(a.id)} alt={a.filename} className="attachment-image" />
+                      </a>
+                    ) : (
+                      <a key={a.id} href={api.fileURL(a.id)} target="_blank" rel="noreferrer" className="attachment-link">
+                        📎 {a.filename} ({(a.file_size / 1024).toFixed(1)} KB)
+                      </a>
+                    )
+                  })}
+                </div>
+              )}
+              {embedImages.length > 0 && (
+                <div className="message-embeds">
+                  {embedImages.map((url, i) => (
+                    <a key={i} href={url} target="_blank" rel="noreferrer">
+                      <img src={url} alt="" className="embed-image" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                    </a>
+                  ))}
+                </div>
+              )}
+              {embedLinks.length > 0 && (
+                <div className="message-embeds">
+                  {embedLinks.map((url, i) => (
+                    <div key={i} className="link-embed">
+                      <a href={url} target="_blank" rel="noreferrer noopener" className="link-embed-url">{url}</a>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
         <div ref={bottomRef} />
       </div>
 
@@ -149,7 +239,22 @@ export default function ChatView({ channel, onStartCall }: Props) {
         </div>
       )}
 
+      {pendingFiles.length > 0 && (
+        <div className="pending-files">
+          {pendingFiles.map((f, i) => (
+            <div key={i} className="pending-file">
+              <span className="pending-file-name">📎 {f.name}</span>
+              <button className="pending-file-remove" onClick={() => removePendingFile(i)}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <form className="message-input" onSubmit={handleSend}>
+        <input type="file" ref={fileInputRef} onChange={handleFileSelect} multiple hidden />
+        <button type="button" className="upload-btn" onClick={() => fileInputRef.current?.click()} title="Upload file">
+          📎
+        </button>
         <input
           type="text"
           value={input}
@@ -157,7 +262,7 @@ export default function ChatView({ channel, onStartCall }: Props) {
           placeholder={`Message ${channel.server_id ? '#' + channel.name : channel.name}`}
           autoFocus
         />
-        <button type="submit">Send</button>
+        <button type="submit" disabled={uploading}>{uploading ? '...' : 'Send'}</button>
       </form>
     </div>
   )

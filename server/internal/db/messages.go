@@ -22,6 +22,10 @@ func (db *DB) GetMessage(id string) (*models.Message, error) {
 	if err != nil {
 		return nil, err
 	}
+	attachments, _ := db.GetMessageAttachments(id)
+	if attachments != nil {
+		m.Attachments = attachments
+	}
 	return m, nil
 }
 
@@ -54,6 +58,10 @@ func (db *DB) GetMessages(channelID string, limit, offset int) ([]models.Message
 			Username:    username,
 			DisplayName: displayName,
 			AvatarURL:   avatarURL,
+		}
+		attachments, _ := db.GetMessageAttachments(m.ID)
+		if attachments != nil {
+			m.Attachments = attachments
 		}
 		messages = append(messages, m)
 	}

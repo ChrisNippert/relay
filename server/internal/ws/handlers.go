@@ -76,16 +76,21 @@ func handleMessage(c *Client, raw []byte) {
 		handleTyping(c, msg.Payload, false)
 	case "call_offer", "call_answer", "ice_candidate", "call_end":
 		handleCallSignal(c, msg.Type, msg.Payload)
+	case "voice_join":
+		handleVoiceJoin(c, msg.Payload)
+	case "voice_leave":
+		handleVoiceLeave(c, msg.Payload)
 	default:
 		log.Printf("Unknown WebSocket message type: %s", msg.Type)
 	}
 }
 
 type chatMessagePayload struct {
-	ChannelID string `json:"channel_id"`
-	Content   string `json:"content"`
-	Nonce     string `json:"nonce"`
-	Type      string `json:"type"`
+	ChannelID     string   `json:"channel_id"`
+	Content       string   `json:"content"`
+	Nonce         string   `json:"nonce"`
+	Type          string   `json:"type"`
+	AttachmentIDs []string `json:"attachment_ids"`
 }
 
 func handleChatMessage(c *Client, payload json.RawMessage) {
@@ -94,7 +99,7 @@ func handleChatMessage(c *Client, payload json.RawMessage) {
 		return
 	}
 
-	if p.Content == "" || p.ChannelID == "" {
+	if p.Content == "" && len(p.AttachmentIDs) == 0 || p.ChannelID == "" {
 		return
 	}
 
@@ -110,10 +115,23 @@ func handleChatMessage(c *Client, payload json.RawMessage) {
 
 	// Store message
 	msgID := uuid.New().String()
+	if p.Content == "" {
+		p.Content = " "
+	}
 	msg, err := c.hub.db.CreateMessage(msgID, p.ChannelID, c.userID, p.Content, p.Nonce, p.Type)
 	if err != nil {
 		log.Printf("Failed to create message: %v", err)
 		return
+	}
+
+	// Link attachments to this message
+	for _, aid := range p.AttachmentIDs {
+		c.hub.db.LinkAttachment(aid, msgID)
+	}
+
+	// Reload to get attachments
+	if len(p.AttachmentIDs) > 0 {
+		msg, _ = c.hub.db.GetMessage(msgID)
 	}
 
 	// Get author info (strip sensitive fields)
@@ -180,4 +198,76 @@ func handleCallSignal(c *Client, signalType string, payload json.RawMessage) {
 	}
 	data := mustMarshal(msg)
 	c.hub.SendToUser(p.TargetUserID, data)
+}
+
+type voicePayload struct {
+	ChannelID string `json:"channel_id"`
+}
+
+func handleVoiceJoin(c *Client, payload json.RawMessage) {
+	var p voicePayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return
+	}
+
+	users := c.hub.VoiceJoin(p.ChannelID, c.userID)
+
+	// Broadcast updated voice state to the channel
+	msg := WSMessage{
+		Type: "voice_state",
+		Payload: json.RawMessage(mustMarshal(map[string]interface{}{
+			"channel_id": p.ChannelID,
+			"user_ids":   users,
+		})),
+	}
+	data := mustMarshal(msg)
+	c.hub.SendToChannel(p.ChannelID, data, "")
+}
+
+func handleVoiceLeave(c *Client, payload json.RawMessage) {
+	var p voicePayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return
+	}
+
+	c.hub.VoiceLeave(p.ChannelID, c.userID)
+
+	users := c.hub.VoiceUsers(p.ChannelID)
+	msg := WSMessage{
+		Type: "voice_state",
+		Payload: json.RawMessage(mustMarshal(map[string]interface{}{
+			"channel_id": p.ChannelID,
+			"user_ids":   users,
+		})),
+	}
+	data := mustMarshal(msg)
+	c.hub.SendToChannel(p.ChannelID, data, "")
+}
+
+// HandleDisconnect cleans up voice state when a user disconnects.
+func HandleDisconnect(hub *Hub, userID string) {
+	channels := hub.VoiceLeaveAll(userID)
+	for _, chID := range channels {
+		users := hub.VoiceUsers(chID)
+		msg := WSMessage{
+			Type: "voice_state",
+			Payload: json.RawMessage(mustMarshal(map[string]interface{}{
+				"channel_id": chID,
+				"user_ids":   users,
+			})),
+		}
+		data := mustMarshal(msg)
+		hub.SendToChannel(chID, data, "")
+
+		// Also notify remaining users to end calls with disconnected user
+		endMsg := WSMessage{
+			Type: "call_end",
+			Payload: json.RawMessage(mustMarshal(map[string]interface{}{
+				"from_user_id": userID,
+				"channel_id":   chID,
+			})),
+		}
+		endData := mustMarshal(endMsg)
+		hub.SendToChannel(chID, endData, userID)
+	}
 }

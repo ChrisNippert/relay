@@ -123,3 +123,7 @@ export async function uploadFile(file: File): Promise<{ id: string; filename: st
 }
 
 export const fileURL = (fileId: string) => `${BASE}/files/${encodeURIComponent(fileId)}`
+
+// Voice state
+export const getVoiceUsers = (channelId: string) =>
+  request<string[]>('GET', `/channels/${encodeURIComponent(channelId)}/voice-users`)

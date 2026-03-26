@@ -395,6 +395,40 @@ html, body, #root {
   opacity: 0.5;
 }
 
+/* Voice channel users in sidebar */
+.voice-channel-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.voice-channel-users {
+  padding: 2px 0 4px 28px;
+}
+
+.voice-channel-user {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  border-radius: 4px;
+}
+
+.voice-channel-user-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--success);
+  flex-shrink: 0;
+}
+
+.voice-channel-user-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .accept-btn {
   padding: 2px 8px;
   border-radius: 4px;
@@ -491,6 +525,90 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* Voice Status Bar (Discord-style, in sidebar) */
+.voice-status-bar {
+  padding: 10px 12px;
+  background: rgba(78, 205, 196, 0.08);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.voice-status-bar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.voice-status-bar-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.voice-status-bar-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--success);
+  letter-spacing: 0.3px;
+}
+
+.voice-status-bar-channel {
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+}
+
+.voice-status-bar-channel:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.voice-status-bar-controls {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.voice-bar-btn {
+  flex: 1;
+  padding: 6px 0;
+  border: none;
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background 0.15s;
+}
+
+.voice-bar-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.voice-bar-btn.active {
+  background: rgba(233, 69, 96, 0.2);
+}
+
+.voice-bar-btn.disconnect {
+  background: rgba(233, 69, 96, 0.3);
+}
+
+.voice-bar-btn.disconnect:hover {
+  background: rgba(233, 69, 96, 0.5);
+}
+
+/* Persistent voice channel wrapper */
+.voice-channel-wrapper {
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* Main Content / Chat */
@@ -655,6 +773,7 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   height: 100%;
+  position: relative;
 }
 
 .voice-header {
@@ -682,53 +801,272 @@ html, body, #root {
   color: var(--success);
 }
 
-.voice-users {
+.voice-status.connecting {
+  background: rgba(255, 183, 77, 0.2);
+  color: #ffb74d;
+}
+
+/* Voice tile grid — fills the channel area */
+.voice-tile-grid {
   flex: 1;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  min-height: 0;
+  overflow: auto;
 }
 
 .voice-empty {
   color: var(--text-muted);
   text-align: center;
-  margin-top: 2rem;
+  grid-column: 1 / -1;
+  align-self: center;
 }
 
-.voice-user {
+/* Adaptive grid columns based on user count */
+.voice-tile-grid.count-0,
+.voice-tile-grid.count-1 {
+  grid-template-columns: 1fr;
+}
+
+.voice-tile-grid.count-2 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.voice-tile-grid.count-3,
+.voice-tile-grid.count-4 {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.voice-tile-grid.count-5,
+.voice-tile-grid.count-6 {
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.voice-tile-grid.count-7,
+.voice-tile-grid.count-8,
+.voice-tile-grid.count-9 {
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr;
+}
+
+.voice-tile-grid.count-10,
+.voice-tile-grid.count-11,
+.voice-tile-grid.count-12 {
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr;
+}
+
+.voice-tile-grid.count-13,
+.voice-tile-grid.count-14,
+.voice-tile-grid.count-15,
+.voice-tile-grid.count-16 {
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr 1fr 1fr;
+}
+
+/* Focused layout: first item large, rest in sidebar strip */
+.voice-tile-grid.has-focused {
+  grid-template-columns: 1fr 200px;
+  grid-template-rows: 1fr;
+}
+
+.voice-tile-grid.has-focused .voice-tile.focused {
+  grid-row: 1 / -1;
+  grid-column: 1;
+}
+
+.voice-tile-grid.has-focused .voice-tile.unfocused {
+  grid-column: 2;
+}
+
+/* Individual voice tile */
+.voice-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--bg-tertiary);
+  border-radius: 12px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+  min-height: 0;
+  position: relative;
+  user-select: none;
+}
+
+.voice-tile:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.voice-tile.speaking {
+  border-color: var(--success);
+  box-shadow: 0 0 16px rgba(78, 205, 196, 0.2);
+}
+
+.voice-tile.is-self {
+  border-color: rgba(78, 205, 196, 0.25);
+}
+
+.voice-tile.is-muted {
+  opacity: 0.7;
+}
+
+.voice-tile.focused {
+  border-color: var(--accent);
+  box-shadow: 0 0 20px rgba(233, 69, 96, 0.15);
+}
+
+/* Voice tile avatar */
+.voice-tile-avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--bg-secondary);
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 6px;
-  transition: background 0.15s;
+  justify-content: center;
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  transition: box-shadow 0.2s, transform 0.2s;
+  border: 3px solid transparent;
 }
 
-.voice-user:hover {
-  background: rgba(255, 255, 255, 0.03);
+.voice-tile.focused .voice-tile-avatar {
+  width: 96px;
+  height: 96px;
+  font-size: 2.4rem;
 }
 
-.voice-user.self {
-  background: rgba(78, 205, 196, 0.08);
+.voice-tile.unfocused .voice-tile-avatar {
+  width: 40px;
+  height: 40px;
+  font-size: 1rem;
 }
 
-.voice-user.muted .voice-user-indicator {
-  opacity: 0.5;
+.voice-tile-avatar.speaking {
+  border-color: var(--success);
+  box-shadow: 0 0 12px rgba(78, 205, 196, 0.5);
+  animation: speakPulse 0.6s ease-in-out infinite alternate;
 }
 
-.voice-user-indicator {
-  font-size: 1.1rem;
+.voice-tile-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 8px;
 }
 
-.voice-user-name {
-  font-size: 0.95rem;
-  font-weight: 500;
-}
-
-.voice-user-tag {
+.voice-tile.unfocused .voice-tile-name {
   font-size: 0.75rem;
+}
+
+.voice-tile-tag {
+  font-weight: 400;
   color: var(--text-muted);
+  font-size: 0.8em;
+}
+
+.voice-tile-badges {
+  display: flex;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+
+.voice-tile.unfocused .voice-tile-badges {
+  font-size: 0.7rem;
+  gap: 3px;
+}
+
+.voice-tile-badge {
+  font-size: inherit;
+}
+
+.voice-tile-badge.muted {
+  opacity: 0.6;
+}
+
+/* Voice tile with media — fills tile with video */
+.voice-tile.has-media {
+  padding: 0;
+  overflow: hidden;
+}
+
+.voice-tile-media {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+}
+
+.voice-tile-media.split {
+  flex-direction: row;
+}
+
+.voice-tile-video-pane {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+.voice-tile-video-pane video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.voice-tile-video-pane.camera-pane video {
+  transform: scaleX(-1);
+}
+
+.voice-tile-media.split .voice-tile-video-pane.secondary {
+  flex: 0 0 35%;
+  border-left: 2px solid var(--bg-primary);
+}
+
+.voice-tile-pane-label {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  pointer-events: none;
+}
+
+.voice-tile-overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 6px 10px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+  pointer-events: none;
+}
+
+.voice-tile-overlay .voice-tile-name {
+  color: white;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
 .voice-controls {
@@ -804,50 +1142,6 @@ html, body, #root {
 
 .voice-leave-btn:hover {
   background: #d63851;
-}
-
-/* Video Grid */
-.video-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 12px;
-  justify-content: center;
-}
-
-.video-grid.remote-grid {
-  padding: 12px;
-}
-
-.video-tile {
-  position: relative;
-  background: var(--bg-tertiary);
-  border-radius: 8px;
-  overflow: hidden;
-  min-width: 240px;
-  max-width: 480px;
-  flex: 1;
-}
-
-.video-tile video {
-  width: 100%;
-  display: block;
-  border-radius: 8px;
-}
-
-.video-tile-name {
-  position: absolute;
-  bottom: 8px;
-  left: 8px;
-  background: rgba(0, 0, 0, 0.6);
-  color: white;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 0.8rem;
-}
-
-.self-video {
-  border: 2px solid var(--success);
 }
 
 /* Settings Overlay */
@@ -1232,4 +1526,227 @@ html, body, #root {
   color: white;
   font-weight: 600;
   cursor: pointer;
+}
+
+/* ============================================
+   File Upload & Attachments
+   ============================================ */
+
+.upload-btn {
+  background: none;
+  border: none;
+  font-size: 1.3rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+.upload-btn:hover {
+  opacity: 1;
+}
+
+.pending-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 16px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+}
+
+.pending-file {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.pending-file-name {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-file-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.pending-file-remove:hover {
+  color: var(--danger);
+}
+
+/* Message attachments */
+.message-attachments {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attachment-image {
+  max-width: 400px;
+  max-height: 300px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.attachment-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.88rem;
+}
+
+.attachment-link:hover {
+  text-decoration: underline;
+}
+
+/* ============================================
+   Link Embeds
+   ============================================ */
+
+.message-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.message-link:hover {
+  text-decoration: underline;
+}
+
+.message-embeds {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.embed-image {
+  max-width: 400px;
+  max-height: 300px;
+  border-radius: 8px;
+}
+
+.link-embed {
+  padding: 10px 12px;
+  background: var(--bg-tertiary);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  max-width: 400px;
+}
+
+.link-embed-url {
+  color: var(--accent);
+  font-size: 0.85rem;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.link-embed-url:hover {
+  text-decoration: underline;
+}
+
+/* ============================================
+   Voice Speaking Indicator
+   ============================================ */
+
+@keyframes speakPulse {
+  from { transform: scale(1); }
+  to { transform: scale(1.15); }
+}
+
+/* ============================================
+   Members Sidebar
+   ============================================ */
+
+.members-sidebar {
+  width: 240px;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.members-sidebar-header {
+  padding: 12px 16px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.members-role-header {
+  padding: 8px 16px 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.4px;
+}
+
+.member-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  border-radius: 6px;
+  margin: 1px 8px;
+  transition: background 0.15s;
+  cursor: default;
+}
+
+.member-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.member-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-tertiary);
+}
+
+.member-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.member-avatar-fallback {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.member-name {
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
