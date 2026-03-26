@@ -113,12 +113,12 @@ export const deleteInvite = (inviteId: string) =>
 // Channels
 export const getChannels = (serverId: string) =>
   request<Channel[]>('GET', `/servers/${encodeURIComponent(serverId)}/channels`)
-export const createChannel = (serverId: string, name: string, type: string) =>
-  request<Channel>('POST', `/servers/${encodeURIComponent(serverId)}/channels`, { name, type })
+export const createChannel = (serverId: string, name: string, type: string, description = '') =>
+  request<Channel>('POST', `/servers/${encodeURIComponent(serverId)}/channels`, { name, type, description })
 export const deleteChannel = (channelId: string) =>
   request<void>('DELETE', `/channels/${encodeURIComponent(channelId)}`)
-export const updateChannel = (channelId: string, name: string) =>
-  request<Channel>('PUT', `/channels/${encodeURIComponent(channelId)}`, { name })
+export const updateChannel = (channelId: string, name: string, description = '') =>
+  request<Channel>('PUT', `/channels/${encodeURIComponent(channelId)}`, { name, description })
 export const updateChannelPositions = (serverId: string, positions: Record<string, number>) =>
   request<void>('PUT', `/servers/${encodeURIComponent(serverId)}/channels/positions`, { positions })
 

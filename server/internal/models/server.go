@@ -19,12 +19,13 @@ type ServerMember struct {
 }
 
 type Channel struct {
-	ID        string    `json:"id"`
-	ServerID  string    `json:"server_id,omitempty"`
-	Name      string    `json:"name"`
-	Type      string    `json:"type"`
-	Position  int       `json:"position"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          string    `json:"id"`
+	ServerID    string    `json:"server_id,omitempty"`
+	Name        string    `json:"name"`
+	Type        string    `json:"type"`
+	Position    int       `json:"position"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type ServerInvite struct {

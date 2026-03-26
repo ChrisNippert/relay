@@ -43,6 +43,7 @@ func (db *DB) migrate() error {
 		`CREATE TABLE IF NOT EXISTS message_edits (id TEXT PRIMARY KEY, message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE, content TEXT NOT NULL, edited_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
 		`ALTER TABLE users ADD COLUMN custom_status TEXT DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN name_color TEXT DEFAULT ''`,
+		`ALTER TABLE channels ADD COLUMN description TEXT DEFAULT ''`,
 	}
 	for _, stmt := range alterations {
 		db.Exec(stmt) // intentionally ignore "duplicate column" errors
@@ -98,6 +99,7 @@ CREATE TABLE IF NOT EXISTS channels (
     name TEXT DEFAULT '',
     type TEXT NOT NULL,
     position INTEGER DEFAULT 0,
+    description TEXT DEFAULT '',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

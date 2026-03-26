@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import type { Channel, Friendship, User } from '../types'
+import type { Channel, Friendship, User, WSMessage } from '../types'
 import * as api from '../services/api'
 import { useAuth } from '../context/AuthContext'
+import { subscribe } from '../services/ws'
 
 interface Props {
   dmChannels: Channel[]
@@ -19,6 +20,7 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall }
   const [searchResults, setSearchResults] = useState<User[]>([])
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState('')
+  const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set())
 
   const loadFriends = () => {
     api.getFriends().then(async (fs) => {
@@ -61,6 +63,31 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall }
   useEffect(() => {
     loadFriends()
   }, [user?.id])
+
+  // Track online status from user data and WS presence
+  useEffect(() => {
+    // Initialize from fetched user data
+    const initial = new Set<string>()
+    for (const [id, u] of friendUsers.entries()) {
+      if (u.status === 'online') initial.add(id)
+    }
+    setOnlineUsers(initial)
+  }, [friendUsers])
+
+  useEffect(() => {
+    const unsub = subscribe((msg: WSMessage) => {
+      if (msg.type === 'presence') {
+        const p = msg.payload as { user_id: string; status: string }
+        setOnlineUsers((prev) => {
+          const next = new Set(prev)
+          if (p.status === 'online') next.add(p.user_id)
+          else next.delete(p.user_id)
+          return next
+        })
+      }
+    })
+    return unsub
+  }, [])
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return
@@ -165,7 +192,7 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall }
                   className={`channel-item ${hasDM ? 'has-dm' : ''}`}
                   onClick={() => handleOpenDM(otherId)}
                 >
-                  <span className="friend-status">●</span>
+                  <span className={`friend-status ${onlineUsers.has(otherId) ? 'online' : 'offline'}`}>●</span>
                   {u?.display_name ?? otherId}
                 </button>
                 <div className="friend-actions">

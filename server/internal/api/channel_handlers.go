@@ -12,8 +12,9 @@ import (
 )
 
 type createChannelRequest struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
 }
 
 func broadcastChannelEvent(hub *ws.Hub, serverID, eventType string, payload interface{}) {
@@ -54,7 +55,7 @@ func CreateChannelHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
 			return
 		}
 
-		channel, err := database.CreateChannel(uuid.New().String(), serverID, req.Name, req.Type, 0)
+		channel, err := database.CreateChannel(uuid.New().String(), serverID, req.Name, req.Type, 0, req.Description)
 		if err != nil {
 			http.Error(w, `{"error":"failed to create channel"}`, http.StatusInternalServerError)
 			return
@@ -129,7 +130,8 @@ func DeleteChannelHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
 }
 
 type updateChannelRequest struct {
-	Name string `json:"name"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 func UpdateChannelHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
@@ -164,7 +166,7 @@ func UpdateChannelHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
 			return
 		}
 
-		updated, err := database.UpdateChannel(channelID, req.Name)
+		updated, err := database.UpdateChannel(channelID, req.Name, req.Description)
 		if err != nil {
 			http.Error(w, `{"error":"failed to update channel"}`, http.StatusInternalServerError)
 			return

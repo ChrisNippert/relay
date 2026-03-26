@@ -25,25 +25,29 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
   const [settingsChannel, setSettingsChannel] = useState<Channel | null>(null)
   const [creatingType, setCreatingType] = useState<'text' | 'voice' | null>(null)
   const [createName, setCreateName] = useState('')
+  const [createDescription, setCreateDescription] = useState('')
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
 
   const handleCreateStart = (type: 'text' | 'voice') => {
     setCreatingType(type)
     setCreateName('')
+    setCreateDescription('')
   }
 
   const handleCreateSubmit = async () => {
     if (!serverId || !creatingType || !createName.trim()) return
-    await api.createChannel(serverId, createName.trim(), creatingType)
+    await api.createChannel(serverId, createName.trim(), creatingType, createDescription.trim())
     setCreatingType(null)
     setCreateName('')
+    setCreateDescription('')
     onChannelsChanged?.()
   }
 
   const handleCreateCancel = () => {
     setCreatingType(null)
     setCreateName('')
+    setCreateDescription('')
   }
 
   const handleDrop = async (targetCh: Channel) => {
@@ -100,24 +104,51 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
     )
   }
 
-  const renderCreateInput = (type: 'text' | 'voice') => {
-    if (creatingType !== type) return null
-    return (
-      <div className="channel-create-input">
-        <input
-          type="text"
-          value={createName}
-          onChange={(e) => setCreateName(e.target.value)}
-          placeholder={`New ${type} channel name`}
-          autoFocus
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleCreateSubmit()
-            if (e.key === 'Escape') handleCreateCancel()
-          }}
-        />
-        <button className="channel-action-btn" onClick={handleCreateSubmit} title="Create">✓</button>
-        <button className="channel-action-btn" onClick={handleCreateCancel} title="Cancel">✕</button>
-      </div>
+  const renderCreateModal = () => {
+    if (!creatingType) return null
+    return createPortal(
+      <div className="settings-overlay" onClick={handleCreateCancel}>
+        <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
+          <div className="settings-header">
+            <h2>Create {creatingType === 'text' ? 'Text' : 'Voice'} Channel</h2>
+            <button className="close-btn" onClick={handleCreateCancel}>×</button>
+          </div>
+          <div className="settings-body">
+            <h3 className="settings-section">Channel Name</h3>
+            <div className="server-name-edit">
+              <input
+                type="text"
+                value={createName}
+                onChange={(e) => setCreateName(e.target.value)}
+                placeholder={`Enter ${creatingType} channel name`}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCreateSubmit()
+                  if (e.key === 'Escape') handleCreateCancel()
+                }}
+              />
+            </div>
+            <h3 className="settings-section">Description (optional)</h3>
+            <div className="server-name-edit">
+              <input
+                type="text"
+                value={createDescription}
+                onChange={(e) => setCreateDescription(e.target.value)}
+                placeholder="What's this channel about?"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCreateSubmit()
+                  if (e.key === 'Escape') handleCreateCancel()
+                }}
+              />
+            </div>
+          </div>
+          <div className="settings-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+            <button className="danger-btn" style={{ background: 'var(--bg-tertiary)' }} onClick={handleCreateCancel}>Cancel</button>
+            <button className="save-btn" onClick={handleCreateSubmit} disabled={!createName.trim()}>Create</button>
+          </div>
+        </div>
+      </div>,
+      document.body
     )
   }
 
@@ -129,7 +160,6 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
             <h3 className="channel-category">Text Channels</h3>
             {isAdmin && <button className="channel-add-btn" onClick={() => handleCreateStart('text')} title="Create Text Channel">+</button>}
           </div>
-          {renderCreateInput('text')}
           {textChannels.map((ch) => renderChannelItem(ch))}
         </>
       )}
@@ -140,7 +170,6 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
             <h3 className="channel-category">Voice Channels</h3>
             {isAdmin && <button className="channel-add-btn" onClick={() => handleCreateStart('voice')} title="Create Voice Channel">+</button>}
           </div>
-          {renderCreateInput('voice')}
           {voiceChannels.map((ch) => {
             const users = voicePresence?.get(ch.id) ?? []
             return (
@@ -161,6 +190,8 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
           })}
         </>
       )}
+
+      {renderCreateModal()}
 
       {settingsChannel && createPortal(
         <ChannelSettings

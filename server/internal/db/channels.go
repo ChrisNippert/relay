@@ -2,10 +2,10 @@ package db
 
 import "github.com/relay-chat/relay/internal/models"
 
-func (db *DB) CreateChannel(id, serverID, name, channelType string, position int) (*models.Channel, error) {
+func (db *DB) CreateChannel(id, serverID, name, channelType string, position int, description string) (*models.Channel, error) {
 	_, err := db.Exec(
-		`INSERT INTO channels (id, server_id, name, type, position) VALUES (?, ?, ?, ?, ?)`,
-		id, serverID, name, channelType, position,
+		`INSERT INTO channels (id, server_id, name, type, position, description) VALUES (?, ?, ?, ?, ?, ?)`,
+		id, serverID, name, channelType, position, description,
 	)
 	if err != nil {
 		return nil, err
@@ -17,9 +17,9 @@ func (db *DB) GetChannel(id string) (*models.Channel, error) {
 	c := &models.Channel{}
 	var serverID *string
 	err := db.QueryRow(
-		`SELECT id, server_id, name, type, position, created_at FROM channels WHERE id = ?`,
+		`SELECT id, server_id, name, type, position, description, created_at FROM channels WHERE id = ?`,
 		id,
-	).Scan(&c.ID, &serverID, &c.Name, &c.Type, &c.Position, &c.CreatedAt)
+	).Scan(&c.ID, &serverID, &c.Name, &c.Type, &c.Position, &c.Description, &c.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +31,7 @@ func (db *DB) GetChannel(id string) (*models.Channel, error) {
 
 func (db *DB) GetChannelsByServer(serverID string) ([]models.Channel, error) {
 	rows, err := db.Query(
-		`SELECT id, server_id, name, type, position, created_at FROM channels WHERE server_id = ? ORDER BY type, position`,
+		`SELECT id, server_id, name, type, position, description, created_at FROM channels WHERE server_id = ? ORDER BY type, position`,
 		serverID,
 	)
 	if err != nil {
@@ -43,7 +43,7 @@ func (db *DB) GetChannelsByServer(serverID string) ([]models.Channel, error) {
 	for rows.Next() {
 		var c models.Channel
 		var sid *string
-		if err := rows.Scan(&c.ID, &sid, &c.Name, &c.Type, &c.Position, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &sid, &c.Name, &c.Type, &c.Position, &c.Description, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		if sid != nil {
@@ -59,8 +59,8 @@ func (db *DB) DeleteChannel(id string) error {
 	return err
 }
 
-func (db *DB) UpdateChannel(id, name string) (*models.Channel, error) {
-	_, err := db.Exec(`UPDATE channels SET name = ? WHERE id = ?`, name, id)
+func (db *DB) UpdateChannel(id, name, description string) (*models.Channel, error) {
+	_, err := db.Exec(`UPDATE channels SET name = ?, description = ? WHERE id = ?`, name, description, id)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +114,7 @@ func (db *DB) CreateDMChannel(channelID, userID1, userID2 string) (*models.Chann
 
 func (db *DB) GetDMChannels(userID string) ([]models.Channel, error) {
 	rows, err := db.Query(
-		`SELECT c.id, c.server_id, c.name, c.type, c.position, c.created_at
+		`SELECT c.id, c.server_id, c.name, c.type, c.position, c.description, c.created_at
 		 FROM channels c
 		 JOIN dm_participants dp ON c.id = dp.channel_id
 		 WHERE dp.user_id = ? AND c.type = 'dm'`,
@@ -129,7 +129,7 @@ func (db *DB) GetDMChannels(userID string) ([]models.Channel, error) {
 	for rows.Next() {
 		var c models.Channel
 		var sid *string
-		if err := rows.Scan(&c.ID, &sid, &c.Name, &c.Type, &c.Position, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &sid, &c.Name, &c.Type, &c.Position, &c.Description, &c.CreatedAt); err != nil {
 			return nil, err
 		}
 		if sid != nil {
@@ -144,13 +144,13 @@ func (db *DB) GetExistingDM(userID1, userID2 string) (*models.Channel, error) {
 	c := &models.Channel{}
 	var sid *string
 	err := db.QueryRow(
-		`SELECT c.id, c.server_id, c.name, c.type, c.position, c.created_at
+		`SELECT c.id, c.server_id, c.name, c.type, c.position, c.description, c.created_at
 		 FROM channels c
 		 JOIN dm_participants dp1 ON c.id = dp1.channel_id AND dp1.user_id = ?
 		 JOIN dm_participants dp2 ON c.id = dp2.channel_id AND dp2.user_id = ?
 		 WHERE c.type = 'dm'`,
 		userID1, userID2,
-	).Scan(&c.ID, &sid, &c.Name, &c.Type, &c.Position, &c.CreatedAt)
+	).Scan(&c.ID, &sid, &c.Name, &c.Type, &c.Position, &c.Description, &c.CreatedAt)
 	if err != nil {
 		return nil, err
 	}

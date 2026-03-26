@@ -21,6 +21,7 @@ function randomCode(): string {
 
 export default function ChannelSettings({ channel, onClose, onChannelUpdated, onChannelDeleted }: Props) {
   const [name, setName] = useState(channel.name)
+  const [description, setDescription] = useState(channel.description || '')
   const [saving, setSaving] = useState(false)
 
   // Encryption
@@ -40,13 +41,13 @@ export default function ChannelSettings({ channel, onClose, onChannelUpdated, on
 
   const handleSaveName = async () => {
     const trimmed = name.trim()
-    if (!trimmed || trimmed === channel.name) return
+    if (!trimmed) return
     setSaving(true)
     try {
-      await api.updateChannel(channel.id, trimmed)
+      await api.updateChannel(channel.id, trimmed, description.trim())
       onChannelUpdated()
     } catch (err) {
-      console.error('Failed to rename channel:', err)
+      console.error('Failed to update channel:', err)
     } finally {
       setSaving(false)
     }
@@ -107,10 +108,22 @@ export default function ChannelSettings({ channel, onClose, onChannelUpdated, on
             <button
               className="save-btn"
               onClick={handleSaveName}
-              disabled={saving || !name.trim() || name.trim() === channel.name}
+              disabled={saving || !name.trim()}
             >
               {saving ? '...' : 'Save'}
             </button>
+          </div>
+
+          {/* Channel Description */}
+          <h3 className="settings-section">Description</h3>
+          <div className="server-name-edit">
+            <input
+              type="text"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What's this channel about?"
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSaveName() }}
+            />
           </div>
 
           {/* Encryption */}

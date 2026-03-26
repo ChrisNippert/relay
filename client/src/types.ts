@@ -44,6 +44,7 @@ export interface Channel {
   name: string
   type: string // "text" | "voice"
   position: number
+  description: string
   created_at: string
 }
 

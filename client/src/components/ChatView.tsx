@@ -218,6 +218,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const initialLoadRef = useRef(true)
   const userNameCache = useRef<Map<string, string>>(new Map())
+  const seenMsgIds = useRef(new Set<string>())
 
   // Resolve DM partner for call buttons and header name
   useEffect(() => {
@@ -292,6 +293,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
   // Load messages on channel change
   useEffect(() => {
     setMessages([])
+    seenMsgIds.current.clear()
     setHasMore(true)
     setReplyingTo(null)
     setEditingMsg(null)
@@ -302,6 +304,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
       // Decrypt any E2E-encrypted messages
       const decrypted = await Promise.all(
         ordered.map(async (m) => {
+          seenMsgIds.current.add(m.id)
           if (e2e.isEncryptedContent(m.content)) {
             const plain = await e2e.decryptMessage(channel.id, m.content)
             return { ...m, content: plain }
@@ -319,6 +322,9 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
       if (msg.type === 'chat_message') {
         const m = msg.payload as Message
         if (m.channel_id === channel.id) {
+          // Synchronous dedup guard — prevents async race
+          if (seenMsgIds.current.has(m.id)) return
+          seenMsgIds.current.add(m.id)
           // Decrypt if encrypted, then add to state
           const handleMsg = async () => {
             let decrypted = m
@@ -684,10 +690,13 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
       onDrop={handleDrop}
     >
       <div className="chat-header">
-        <span className="chat-header-name">
-          {channel.server_id ? '#' : '💬'} {channel.server_id ? channel.name : (dmPartnerName || channel.name)}
-          {encrypted && <span className="chat-header-lock" title={encryptionReady ? 'End-to-end encrypted' : 'Encrypted — waiting for key'}>{encryptionReady ? '🔒' : '🔓'}</span>}
-        </span>
+        <div className="chat-header-left">
+          <span className="chat-header-name">
+            {channel.server_id ? '#' : '💬'} {channel.server_id ? channel.name : (dmPartnerName || channel.name)}
+            {encrypted && <span className="chat-header-lock" title={encryptionReady ? 'End-to-end encrypted' : 'Encrypted — waiting for key'}>{encryptionReady ? '🔒' : '🔓'}</span>}
+          </span>
+          {channel.description && <span className="chat-header-desc">{channel.description}</span>}
+        </div>
         <div className="chat-header-actions">
           <button className="chat-call-btn" onClick={() => setSearchOpen((p) => { if (p) closeSearch(); return !p })} title="Search Messages">
             🔍
