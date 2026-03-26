@@ -107,6 +107,26 @@ func (h *Hub) SendToUser(userID string, data []byte) {
 	}
 }
 
+
+// SendToServer sends a message to all connected members of a server.
+func (h *Hub) SendToServer(serverID string, data []byte) {
+	members, err := h.db.GetServerMembers(serverID)
+	if err != nil {
+		return
+	}
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for _, m := range members {
+		for client := range h.clients[m.UserID] {
+			select {
+			case client.send <- data:
+			default:
+			}
+		}
+	}
+}
 // SendToChannel sends a message to all connected users with access to a channel.
 func (h *Hub) SendToChannel(channelID string, data []byte, excludeUserID string) {
 	channel, err := h.db.GetChannel(channelID)

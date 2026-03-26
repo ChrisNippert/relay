@@ -157,3 +157,11 @@ func (db *DB) IsServerMember(serverID, userID string) (bool, error) {
 	).Scan(&count)
 	return count > 0, err
 }
+
+func (db *DB) UpdateMemberRole(serverID, userID, role string) error {
+	_, err := db.Exec(
+		`UPDATE server_members SET role = ? WHERE server_id = ? AND user_id = ?`,
+		role, serverID, userID,
+	)
+	return err
+}

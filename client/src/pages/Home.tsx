@@ -38,6 +38,7 @@ export default function Home() {
     muted: false, deafened: false, videoOn: false, screenSharing: false, joined: false,
   })
   const [voicePresence, setVoicePresence] = useState<Map<string, VoicePresenceUser[]>>(new Map())
+  const [isAdmin, setIsAdmin] = useState(false)
 
   // Poll voice ref state to keep sidebar controls in sync
   const syncVoiceControls = useCallback(() => {
@@ -146,10 +147,49 @@ export default function Home() {
   useEffect(() => {
     if (selectedServer) {
       api.getChannels(selectedServer.id).then(setChannels).catch(console.error)
+      // Determine admin status
+      api.getMembers(selectedServer.id).then((members) => {
+        const me = members.find((m) => m.user_id === user?.id)
+        setIsAdmin(me?.role === 'admin')
+      }).catch(() => setIsAdmin(false))
     } else {
       setChannels([])
+      setIsAdmin(false)
+    }
+  }, [selectedServer, user?.id])
+
+  const refreshChannels = useCallback(() => {
+    if (selectedServer) {
+      api.getChannels(selectedServer.id).then(setChannels).catch(console.error)
     }
   }, [selectedServer])
+
+  // Listen for channel changes via WS
+  useEffect(() => {
+    const unsub = subscribe((msg: WSMsg) => {
+      const payload = msg.payload as Record<string, unknown>
+      const serverID = payload?.server_id as string | undefined
+      if (!serverID || serverID !== selectedServer?.id) return
+
+      if (msg.type === 'channel_created') {
+        setChannels((prev) => [...prev, payload as unknown as Channel])
+      } else if (msg.type === 'channel_updated') {
+        setChannels((prev) => prev.map((c) => c.id === (payload as { id: string }).id ? (payload as unknown as Channel) : c))
+      } else if (msg.type === 'channel_deleted') {
+        const deletedId = (payload as { id: string }).id
+        setChannels((prev) => prev.filter((c) => c.id !== deletedId))
+        if (selectedChannel?.id === deletedId) setSelectedChannel(null)
+      } else if (msg.type === 'channels_reordered') {
+        const chs = (payload as { channels: Channel[] }).channels
+        if (chs) setChannels(chs)
+      } else if (msg.type === 'member_role_updated') {
+        const uid = (payload as { user_id: string }).user_id
+        const role = (payload as { role: string }).role
+        if (uid === user?.id) setIsAdmin(role === 'admin')
+      }
+    })
+    return unsub
+  }, [selectedServer?.id, selectedChannel?.id, user?.id])
 
   const handleSelectServer = (server: Server) => {
     setSelectedServer(server)
@@ -197,6 +237,18 @@ export default function Home() {
     }
     setShowServerSettings(false)
   }
+
+  const handleDMUser = useCallback(async (userId: string) => {
+    try {
+      const ch = await api.createDM(userId)
+      setDmChannels((prev) => prev.some((d) => d.id === ch.id) ? prev : [...prev, ch])
+      setSelectedServer(null)
+      setView('dm')
+      setSelectedChannel(ch)
+    } catch (e) {
+      console.error('Failed to open DM:', e)
+    }
+  }, [])
 
   const handleStartDMCall = async (userId: string, video: boolean) => {
     try {
@@ -358,6 +410,9 @@ export default function Home() {
             selected={selectedChannel}
             onSelect={handleSelectChannel}
             voicePresence={voicePresence}
+            isAdmin={isAdmin}
+            serverId={selectedServer?.id}
+            onChannelsChanged={refreshChannels}
           />
         )}
 
@@ -456,7 +511,7 @@ export default function Home() {
               onEnd={() => setDmCall(null)}
             />
           ) : selectedChannel && !isVoiceChannel ? (
-            <ChatView channel={selectedChannel} onStartCall={handleStartDMCall} />
+            <ChatView channel={selectedChannel} onStartCall={handleStartDMCall} onDMUser={handleDMUser} />
           ) : !selectedChannel ? (
             <div className="no-channel">
               <p>Select a channel to start chatting</p>
@@ -467,7 +522,7 @@ export default function Home() {
 
       {/* Members sidebar for servers */}
       {view === 'server' && selectedServer && (
-        <MembersSidebar serverId={selectedServer.id} />
+        <MembersSidebar serverId={selectedServer.id} onMessage={handleDMUser} isAdmin={isAdmin} />
       )}
 
       {/* Settings Modal */}

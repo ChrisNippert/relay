@@ -68,6 +68,7 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		r.Post("/api/servers/{serverID}/join", JoinServerHandler(database))
 		r.Post("/api/servers/{serverID}/leave", LeaveServerHandler(database))
 		r.Get("/api/servers/{serverID}/members", GetMembersHandler(database))
+		r.Put("/api/servers/{serverID}/members/{userID}/role", UpdateMemberRoleHandler(database, hub))
 
 		// Server invites
 		r.Post("/api/servers/{serverID}/invites", CreateInviteHandler(database))
@@ -76,9 +77,11 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		r.Delete("/api/invites/{inviteID}", DeleteInviteHandler(database))
 
 		// Channels
-		r.Post("/api/servers/{serverID}/channels", CreateChannelHandler(database))
+		r.Post("/api/servers/{serverID}/channels", CreateChannelHandler(database, hub))
 		r.Get("/api/servers/{serverID}/channels", GetChannelsHandler(database))
-		r.Delete("/api/channels/{channelID}", DeleteChannelHandler(database))
+		r.Put("/api/channels/{channelID}", UpdateChannelHandler(database, hub))
+		r.Delete("/api/channels/{channelID}", DeleteChannelHandler(database, hub))
+		r.Put("/api/servers/{serverID}/channels/positions", UpdateChannelPositionsHandler(database, hub))
 
 		// DMs
 		r.Post("/api/dm", CreateDMHandler(database))
@@ -100,6 +103,9 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 
 		// File upload
 		r.Post("/api/upload", UploadHandler(cfg, database))
+
+		// OpenGraph metadata
+		r.Get("/api/og", OGHandler())
 	})
 
 	return r

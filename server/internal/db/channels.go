@@ -59,6 +59,29 @@ func (db *DB) DeleteChannel(id string) error {
 	return err
 }
 
+func (db *DB) UpdateChannel(id, name string) (*models.Channel, error) {
+	_, err := db.Exec(`UPDATE channels SET name = ? WHERE id = ?`, name, id)
+	if err != nil {
+		return nil, err
+	}
+	return db.GetChannel(id)
+}
+
+func (db *DB) UpdateChannelPositions(serverID string, positions map[string]int) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for channelID, pos := range positions {
+		_, err := tx.Exec(`UPDATE channels SET position = ? WHERE id = ? AND server_id = ?`, pos, channelID, serverID)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (db *DB) CreateDMChannel(channelID, userID1, userID2 string) (*models.Channel, error) {
 	tx, err := db.Begin()
 	if err != nil {

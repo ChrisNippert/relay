@@ -4,10 +4,12 @@ import * as api from '../services/api'
 import hljs from 'highlight.js'
 import { sendChatMessage, sendTypingStart, sendTypingStop, sendEditMessage, sendDeleteMessage, subscribe } from '../services/ws'
 import { useAuth } from '../context/AuthContext'
+import UserPopover from './UserPopover'
 
 interface Props {
   channel: Channel
   onStartCall?: (userId: string, video: boolean) => void
+  onDMUser?: (userId: string) => void
 }
 
 const URL_REGEX = /https?:\/\/[^\s<]+/g
@@ -110,7 +112,70 @@ function renderInlineContent(text: string, keyPrefix: string, result: (string | 
   })
 }
 
-export default function ChatView({ channel, onStartCall }: Props) {
+const YOUTUBE_RE = /(?:youtube\.com\/watch\?.*v=|youtu\.be\/)([\w-]{11})/
+
+// Global OG cache shared across all messages
+const ogCache = new Map<string, api.OGData | null>()
+
+function LinkEmbed({ url }: { url: string }) {
+  const [og, setOG] = useState<api.OGData | null>(null)
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    if (ogCache.has(url)) {
+      setOG(ogCache.get(url) ?? null)
+      setLoaded(true)
+      return
+    }
+    let cancelled = false
+    api.fetchOG(url).then((data) => {
+      if (cancelled) return
+      ogCache.set(url, data)
+      setOG(data)
+      setLoaded(true)
+    }).catch(() => {
+      if (cancelled) return
+      ogCache.set(url, null)
+      setLoaded(true)
+    })
+    return () => { cancelled = true }
+  }, [url])
+
+  if (!loaded || !og) return null
+  if (!og.title && !og.description && !og.video_embed) return (
+    <div className="link-embed">
+      <a href={url} target="_blank" rel="noreferrer noopener" className="link-embed-url">{url}</a>
+    </div>
+  )
+
+  const ytMatch = url.match(YOUTUBE_RE)
+
+  return (
+    <div className="rich-embed">
+      {og.site_name && <div className="rich-embed-site">{og.site_name}</div>}
+      {og.title && (
+        <a href={url} target="_blank" rel="noreferrer noopener" className="rich-embed-title">{og.title}</a>
+      )}
+      {og.description && <div className="rich-embed-desc">{og.description.length > 300 ? og.description.slice(0, 300) + '…' : og.description}</div>}
+      {ytMatch && og.video_embed ? (
+        <div className="rich-embed-video">
+          <iframe
+            src={og.video_embed}
+            title={og.title || 'Video'}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        </div>
+      ) : og.image ? (
+        <a href={url} target="_blank" rel="noreferrer noopener">
+          <img src={og.image} alt="" className="rich-embed-thumb" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+        </a>
+      ) : null}
+    </div>
+  )
+}
+
+export default function ChatView({ channel, onStartCall, onDMUser }: Props) {
   const { user } = useAuth()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -128,6 +193,7 @@ export default function ChatView({ channel, onStartCall }: Props) {
   const [editHistory, setEditHistory] = useState<MessageEdit[]>([])
   const [mentionUsers, setMentionUsers] = useState<User[]>([])
   const [members, setMembers] = useState<User[]>([])
+  const [popover, setPopover] = useState<{ userId: string; rect: DOMRect } | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const typingTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -542,7 +608,10 @@ export default function ChatView({ channel, onStartCall }: Props) {
                 })()}
                 {!isGrouped && (
                   <div className="message-header">
-                    <span className="message-author">{m.author?.display_name ?? m.user_id}</span>
+                    <span className="message-author clickable" onClick={(e) => {
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                      setPopover({ userId: m.user_id, rect })
+                    }}>{m.author?.display_name ?? m.user_id}</span>
                     <span className="message-time">{formatTime(m.created_at)}</span>
                   </div>
                 )}
@@ -599,9 +668,7 @@ export default function ChatView({ channel, onStartCall }: Props) {
                 {embedLinks.length > 0 && (
                   <div className="message-embeds">
                     {embedLinks.map((url, i) => (
-                      <div key={i} className="link-embed">
-                        <a href={url} target="_blank" rel="noreferrer noopener" className="link-embed-url">{url}</a>
-                      </div>
+                      <LinkEmbed key={i} url={url} />
                     ))}
                   </div>
                 )}
@@ -673,6 +740,13 @@ export default function ChatView({ channel, onStartCall }: Props) {
             rows={1}
             className="message-textarea"
             onKeyDown={e => {
+              if (e.key === 'ArrowUp' && !input && !editingMsg) {
+                const myLastMsg = [...messages].reverse().find(m => m.user_id === user?.id && !m.deleted)
+                if (myLastMsg) {
+                  e.preventDefault()
+                  handleEdit(myLastMsg)
+                }
+              }
               if (e.key === 'Enter' && !e.shiftKey) {
                 // If there's an unclosed code block (odd number of ```), Enter = newline
                 const backtickCount = (input.match(/```/g) || []).length
@@ -730,6 +804,15 @@ export default function ChatView({ channel, onStartCall }: Props) {
             </div>
           </div>
         </div>
+      )}
+
+      {popover && (
+        <UserPopover
+          userId={popover.userId}
+          anchorRect={popover.rect}
+          onClose={() => setPopover(null)}
+          onMessage={onDMUser}
+        />
       )}
     </div>
   )

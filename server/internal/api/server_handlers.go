@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/relay-chat/relay/internal/db"
+	"github.com/relay-chat/relay/internal/ws"
 )
 
 type createServerRequest struct {
@@ -195,5 +196,66 @@ func GetMembersHandler(database *db.DB) http.HandlerFunc {
 			return
 		}
 		json.NewEncoder(w).Encode(members)
+	}
+}
+
+type updateMemberRoleRequest struct {
+	Role string `json:"role"`
+}
+
+func UpdateMemberRoleHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		serverID := chi.URLParam(r, "serverID")
+		targetUserID := chi.URLParam(r, "userID")
+
+		// Only admins can change roles
+		role, err := database.GetMemberRole(serverID, GetUserID(r))
+		if err != nil || role != "admin" {
+			http.Error(w, `{"error":"admin access required"}`, http.StatusForbidden)
+			return
+		}
+
+		// Cannot change your own role
+		if targetUserID == GetUserID(r) {
+			http.Error(w, `{"error":"cannot change your own role"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Cannot change the server owner's role
+		server, err := database.GetServer(serverID)
+		if err != nil {
+			http.Error(w, `{"error":"server not found"}`, http.StatusNotFound)
+			return
+		}
+		if targetUserID == server.OwnerID {
+			http.Error(w, `{"error":"cannot change server owner's role"}`, http.StatusBadRequest)
+			return
+		}
+
+		var req updateMemberRoleRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+			return
+		}
+
+		if req.Role != "admin" && req.Role != "member" {
+			http.Error(w, `{"error":"role must be 'admin' or 'member'"}`, http.StatusBadRequest)
+			return
+		}
+
+		if err := database.UpdateMemberRole(serverID, targetUserID, req.Role); err != nil {
+			http.Error(w, `{"error":"failed to update role"}`, http.StatusInternalServerError)
+			return
+		}
+
+		// Broadcast member role update
+		broadcastChannelEvent(hub, serverID, "member_role_updated", map[string]string{
+			"server_id": serverID,
+			"user_id":   targetUserID,
+			"role":      req.Role,
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"role": req.Role})
 	}
 }

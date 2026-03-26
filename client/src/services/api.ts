@@ -72,6 +72,8 @@ export const deleteServer = (id: string) => request<void>('DELETE', `/servers/${
 export const joinServer = (id: string) => request<void>('POST', `/servers/${encodeURIComponent(id)}/join`)
 export const leaveServer = (id: string) => request<void>('POST', `/servers/${encodeURIComponent(id)}/leave`)
 export const getMembers = (id: string) => request<ServerMember[]>('GET', `/servers/${encodeURIComponent(id)}/members`)
+export const updateMemberRole = (serverId: string, userId: string, role: string) =>
+  request<{ role: string }>('PUT', `/servers/${encodeURIComponent(serverId)}/members/${encodeURIComponent(userId)}/role`, { role })
 
 // Server invites
 export const createInvite = (serverId: string, maxUses = 0, expiresIn = 0) =>
@@ -90,6 +92,10 @@ export const createChannel = (serverId: string, name: string, type: string) =>
   request<Channel>('POST', `/servers/${encodeURIComponent(serverId)}/channels`, { name, type })
 export const deleteChannel = (channelId: string) =>
   request<void>('DELETE', `/channels/${encodeURIComponent(channelId)}`)
+export const updateChannel = (channelId: string, name: string) =>
+  request<Channel>('PUT', `/channels/${encodeURIComponent(channelId)}`, { name })
+export const updateChannelPositions = (serverId: string, positions: Record<string, number>) =>
+  request<void>('PUT', `/servers/${encodeURIComponent(serverId)}/channels/positions`, { positions })
 
 // DMs
 export const createDM = (userId: string) => request<Channel>('POST', '/dm', { user_id: userId })
@@ -169,3 +175,16 @@ export const fileURL = (fileId: string) => `${BASE}/files/${encodeURIComponent(f
 // Voice state
 export const getVoiceUsers = (channelId: string) =>
   request<string[]>('GET', `/channels/${encodeURIComponent(channelId)}/voice-users`)
+
+// OpenGraph metadata
+export interface OGData {
+  url: string
+  title?: string
+  description?: string
+  image?: string
+  site_name?: string
+  video_embed?: string
+}
+
+export const fetchOG = (url: string) =>
+  request<OGData>('GET', `/og?url=${encodeURIComponent(url)}`)
