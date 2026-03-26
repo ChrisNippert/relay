@@ -50,13 +50,17 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
   const [, setLocalSpeaking] = useState(false)
   const [focusedUser, setFocusedUser] = useState<string | null>(null)
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map())
+  const [remoteScreenStreams, setRemoteScreenStreams] = useState<Map<string, MediaStream>>(new Map())
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   const peersRef = useRef<Map<string, PeerConnection>>(new Map())
+  const primaryStreamIds = useRef<Map<string, string>>(new Map())
   const localStreamRef = useRef<MediaStream | null>(null)
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const localScreenRef = useRef<HTMLVideoElement>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
   const remoteAudioRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const speakingAnimRef = useRef<number>(0)
@@ -166,6 +170,21 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
 
   const getName = useCallback((userId: string) => members.get(userId) ?? userId.slice(0, 8), [members])
 
+  // Fullscreen change listener
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', handler)
+    return () => document.removeEventListener('fullscreenchange', handler)
+  }, [])
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen()
+    } else {
+      containerRef.current?.requestFullscreen()
+    }
+  }
+
   // Voice activity detection for local mic
   function startVoiceActivityDetection(stream: MediaStream) {
     try {
@@ -246,6 +265,11 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
 
     stream.getTracks().forEach((track) => pc.pc.addTrack(track, stream))
 
+    // Also add screen share tracks if currently sharing
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((track) => pc.pc.addTrack(track, screenStreamRef.current!))
+    }
+
     pc.onIceCandidate = (candidate) => {
       sendIceCandidate(targetUserId, channel.id, candidate)
     }
@@ -285,6 +309,11 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
 
     localStreamRef.current.getTracks().forEach((track) => pc.pc.addTrack(track, localStreamRef.current!))
 
+    // Also add screen share tracks if currently sharing
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach((track) => pc.pc.addTrack(track, screenStreamRef.current!))
+    }
+
     pc.onIceCandidate = (candidate) => {
       sendIceCandidate(fromUserId, channel.id, candidate)
     }
@@ -322,7 +351,13 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     }
     const el = document.getElementById(`remote-audio-${userId}`)
     el?.remove()
+    primaryStreamIds.current.delete(userId)
     setRemoteStreams((prev) => {
+      const next = new Map(prev)
+      next.delete(userId)
+      return next
+    })
+    setRemoteScreenStreams((prev) => {
       const next = new Map(prev)
       next.delete(userId)
       return next
@@ -332,39 +367,69 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
   }
 
   function attachRemoteMedia(userId: string, stream: MediaStream) {
-    // Remove any existing audio-only element
-    const existingEl = document.getElementById(`remote-audio-${userId}`)
-    if (existingEl) existingEl.remove()
+    // Track first stream per user as primary (camera/audio)
+    if (!primaryStreamIds.current.has(userId)) {
+      primaryStreamIds.current.set(userId, stream.id)
+    }
 
-    const settings = getSettings()
-    const hasVideoTrack = stream.getVideoTracks().length > 0
+    const isPrimary = stream.id === primaryStreamIds.current.get(userId)
 
-    if (hasVideoTrack) {
-      // Store stream in React state so it renders in the user's tile
-      setRemoteStreams((prev) => {
+    if (isPrimary) {
+      const hasVideoTrack = stream.getVideoTracks().length > 0
+      if (hasVideoTrack) {
+        setRemoteStreams((prev) => {
+          const next = new Map(prev)
+          next.set(userId, stream)
+          return next
+        })
+        setVoiceUsers((prev) =>
+          prev.map((u) => u.id === userId ? { ...u, hasVideo: true } : u)
+        )
+      }
+
+      // Set up audio element
+      const existingEl = document.getElementById(`remote-audio-${userId}`)
+      if (existingEl) existingEl.remove()
+
+      const settings = getSettings()
+      const audio = document.createElement('audio')
+      audio.id = `remote-audio-${userId}`
+      audio.srcObject = stream
+      audio.autoplay = true
+      audio.volume = settings.outputVolume / 100
+      audio.setAttribute('playsinline', '')
+      remoteAudioRef.current?.appendChild(audio)
+
+      if (settings.audioOutputDevice && 'setSinkId' in audio) {
+        (audio as HTMLAudioElement & { setSinkId: (id: string) => Promise<void> })
+          .setSinkId(settings.audioOutputDevice).catch(() => {})
+      }
+    } else {
+      // Screen share stream from remote peer
+      setRemoteScreenStreams((prev) => {
         const next = new Map(prev)
         next.set(userId, stream)
         return next
       })
-
       setVoiceUsers((prev) =>
-        prev.map((u) => u.id === userId ? { ...u, hasVideo: true } : u)
+        prev.map((u) => u.id === userId ? { ...u, hasScreen: true } : u)
       )
-    }
 
-    // Always create a hidden audio element for audio playback
-    const audio = document.createElement('audio')
-    audio.id = `remote-audio-${userId}`
-    audio.srcObject = stream
-    audio.autoplay = true
-    audio.volume = settings.outputVolume / 100
-    audio.setAttribute('playsinline', '')
-    remoteAudioRef.current?.appendChild(audio)
-
-    // Set output device if supported
-    if (settings.audioOutputDevice && 'setSinkId' in audio) {
-      (audio as HTMLAudioElement & { setSinkId: (id: string) => Promise<void> })
-        .setSinkId(settings.audioOutputDevice).catch(() => {})
+      // Detect when screen share tracks end
+      const checkEnded = () => {
+        if (stream.getTracks().length === 0 || stream.getTracks().every(t => t.readyState === 'ended')) {
+          setRemoteScreenStreams((prev) => {
+            const next = new Map(prev)
+            next.delete(userId)
+            return next
+          })
+          setVoiceUsers((prev) =>
+            prev.map((u) => u.id === userId ? { ...u, hasScreen: false } : u)
+          )
+        }
+      }
+      stream.addEventListener('removetrack', checkEnded)
+      stream.getTracks().forEach(t => t.addEventListener('ended', checkEnded))
     }
   }
 
@@ -391,6 +456,8 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     setJoined(false)
     setVoiceUsers([])
     setRemoteStreams(new Map())
+    setRemoteScreenStreams(new Map())
+    primaryStreamIds.current.clear()
     setMuted(false)
     setDeafened(false)
     setVideoOn(false)
@@ -463,7 +530,11 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     if (screenSharing) {
       screenStreamRef.current?.getTracks().forEach((t) => {
         t.stop()
-        localStreamRef.current?.removeTrack(t)
+        // Remove senders from all peer connections
+        for (const pc of peersRef.current.values()) {
+          const sender = pc.pc.getSenders().find(s => s.track === t)
+          if (sender) pc.pc.removeTrack(sender)
+        }
       })
       screenStreamRef.current = null
       if (localScreenRef.current) localScreenRef.current.srcObject = null
@@ -480,17 +551,23 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
           localScreenRef.current.srcObject = screenStream
         }
         screenStream.getTracks().forEach((t) => {
-          localStreamRef.current?.addTrack(t)
+          // Add to peer connections with screenStream (not localStream) so remote gets a separate stream
           for (const pc of peersRef.current.values()) {
-            pc.pc.addTrack(t, localStreamRef.current!)
+            pc.pc.addTrack(t, screenStream)
           }
           t.onended = () => {
+            // Remove senders from all peer connections
+            for (const pc of peersRef.current.values()) {
+              const sender = pc.pc.getSenders().find(s => s.track === t)
+              if (sender) pc.pc.removeTrack(sender)
+            }
             setScreenSharing(false)
             setVoiceUsers((prev) =>
               prev.map((u) => u.id === user!.id ? { ...u, hasScreen: false } : u)
             )
             screenStreamRef.current = null
             if (localScreenRef.current) localScreenRef.current.srcObject = null
+            renegotiateAllPeers()
           }
         })
         setScreenSharing(true)
@@ -533,96 +610,118 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     setFocusedUser((prev) => prev === tileId ? null : tileId)
   }
 
+  const renderTile = (tile: typeof displayTiles[0], isFocused: boolean, isUnfocused: boolean) => {
+    const remoteStream = remoteStreams.get(tile.userId)
+    const remoteScreen = remoteScreenStreams.get(tile.userId)
+
+    if (tile.type === 'screen') {
+      return (
+        <div
+          key={tile.tileId}
+          className={`voice-tile has-media ${isFocused ? 'focused' : ''} ${isUnfocused ? 'unfocused' : ''}`}
+          onClick={() => handleTileClick(tile.tileId)}
+        >
+          <div className="voice-tile-media">
+            <div className="voice-tile-video-pane screen-pane">
+              {tile.isSelf ? (
+                <video ref={(el) => {
+                  localScreenRef.current = el
+                  if (el && screenStreamRef.current && el.srcObject !== screenStreamRef.current) {
+                    el.srcObject = screenStreamRef.current
+                  }
+                }} autoPlay playsInline muted />
+              ) : remoteScreen ? (
+                <video autoPlay playsInline ref={(el) => { if (el && el.srcObject !== remoteScreen) el.srcObject = remoteScreen }} />
+              ) : null}
+            </div>
+            <div className="voice-tile-overlay">
+              <span className="voice-tile-name">{tile.displayName}'s screen</span>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    return (
+      <div
+        key={tile.tileId}
+        className={`voice-tile ${tile.speaking ? 'speaking' : ''} ${tile.isSelf ? 'is-self' : ''} ${muted && tile.isSelf ? 'is-muted' : ''} ${isFocused ? 'focused' : ''} ${isUnfocused ? 'unfocused' : ''} ${tile.hasVideo ? 'has-media' : ''}`}
+        onClick={() => handleTileClick(tile.tileId)}
+      >
+        {tile.hasVideo ? (
+          <div className="voice-tile-media">
+            <div className="voice-tile-video-pane camera-pane">
+              {tile.isSelf ? (
+                <video ref={(el) => {
+                  localVideoRef.current = el
+                  if (el && localStreamRef.current && el.srcObject !== localStreamRef.current) {
+                    el.srcObject = localStreamRef.current
+                  }
+                }} autoPlay playsInline muted />
+              ) : remoteStream ? (
+                <video autoPlay playsInline ref={(el) => { if (el && el.srcObject !== remoteStream) el.srcObject = remoteStream }} />
+              ) : null}
+            </div>
+            <div className="voice-tile-overlay">
+              <span className="voice-tile-name">
+                {tile.displayName}
+                {tile.isSelf && <span className="voice-tile-tag"> (you)</span>}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <>
+            <span className={`voice-tile-avatar ${tile.speaking ? 'speaking' : ''}`}>
+              {tile.displayName.charAt(0).toUpperCase()}
+            </span>
+            <span className="voice-tile-name">
+              {tile.displayName}
+              {tile.isSelf && <span className="voice-tile-tag"> (you)</span>}
+            </span>
+            <div className="voice-tile-badges">
+              {muted && tile.isSelf && <span className="voice-tile-badge muted" title="Muted">🔇</span>}
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+
+  const focusedTile = hasFocused ? sortedTiles[0] : null
+  const unfocusedTiles = hasFocused ? sortedTiles.slice(1) : []
+
   return (
-    <div className="voice-channel">
+    <div className="voice-channel" ref={containerRef}>
       <div className="voice-header">
         <span className="voice-header-name">🔊 {channel.name}</span>
         {joined && <span className="voice-status connected">Connected</span>}
         {connecting && <span className="voice-status connecting">Connecting…</span>}
-      </div>
-
-      <div className={`voice-tile-grid ${hasFocused ? 'has-focused' : ''} count-${Math.min(displayTiles.length, 16)}`}>
-        {voiceUsers.length === 0 && !joined && (
-          <p className="voice-empty">No one is in this channel</p>
+        {joined && (
+          <button className="voice-fullscreen-btn" onClick={toggleFullscreen} title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}>
+            {isFullscreen ? '⊠' : '⛶'}
+          </button>
         )}
-        {sortedTiles.map((tile) => {
-          const remoteStream = remoteStreams.get(tile.userId)
-          const isFocused = focusedUser === tile.tileId
-          const isUnfocused = hasFocused && !isFocused
-
-          if (tile.type === 'screen') {
-            return (
-              <div
-                key={tile.tileId}
-                className={`voice-tile has-media ${isFocused ? 'focused' : ''} ${isUnfocused ? 'unfocused' : ''}`}
-                onClick={() => handleTileClick(tile.tileId)}
-              >
-                <div className="voice-tile-media">
-                  <div className="voice-tile-video-pane screen-pane">
-                    {tile.isSelf ? (
-                      <video ref={(el) => {
-                        localScreenRef.current = el
-                        if (el && screenStreamRef.current && el.srcObject !== screenStreamRef.current) {
-                          el.srcObject = screenStreamRef.current
-                        }
-                      }} autoPlay playsInline muted />
-                    ) : remoteStream ? (
-                      <video autoPlay playsInline ref={(el) => { if (el && el.srcObject !== remoteStream) el.srcObject = remoteStream }} />
-                    ) : null}
-                  </div>
-                  <div className="voice-tile-overlay">
-                    <span className="voice-tile-name">{tile.displayName}'s screen</span>
-                  </div>
-                </div>
-              </div>
-            )
-          }
-
-          return (
-            <div
-              key={tile.tileId}
-              className={`voice-tile ${tile.speaking ? 'speaking' : ''} ${tile.isSelf ? 'is-self' : ''} ${muted && tile.isSelf ? 'is-muted' : ''} ${isFocused ? 'focused' : ''} ${isUnfocused ? 'unfocused' : ''} ${tile.hasVideo ? 'has-media' : ''}`}
-              onClick={() => handleTileClick(tile.tileId)}
-            >
-              {tile.hasVideo ? (
-                <div className="voice-tile-media">
-                  <div className="voice-tile-video-pane camera-pane">
-                    {tile.isSelf ? (
-                      <video ref={(el) => {
-                        localVideoRef.current = el
-                        if (el && localStreamRef.current && el.srcObject !== localStreamRef.current) {
-                          el.srcObject = localStreamRef.current
-                        }
-                      }} autoPlay playsInline muted />
-                    ) : remoteStream ? (
-                      <video autoPlay playsInline ref={(el) => { if (el && el.srcObject !== remoteStream) el.srcObject = remoteStream }} />
-                    ) : null}
-                  </div>
-                  <div className="voice-tile-overlay">
-                    <span className="voice-tile-name">
-                      {tile.displayName}
-                      {tile.isSelf && <span className="voice-tile-tag"> (you)</span>}
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <span className={`voice-tile-avatar ${tile.speaking ? 'speaking' : ''}`}>
-                    {tile.displayName.charAt(0).toUpperCase()}
-                  </span>
-                  <span className="voice-tile-name">
-                    {tile.displayName}
-                    {tile.isSelf && <span className="voice-tile-tag"> (you)</span>}
-                  </span>
-                  <div className="voice-tile-badges">
-                    {muted && tile.isSelf && <span className="voice-tile-badge muted" title="Muted">🔇</span>}
-                  </div>
-                </>
-              )}
-            </div>
-          )
-        })}
       </div>
+
+      {hasFocused ? (
+        <div className="voice-tile-grid focused-layout">
+          <div className="voice-focused-main">
+            {focusedTile && renderTile(focusedTile, true, false)}
+          </div>
+          {unfocusedTiles.length > 0 && (
+            <div className="voice-focused-sidebar">
+              {unfocusedTiles.map((t) => renderTile(t, false, true))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className={`voice-tile-grid count-${Math.min(displayTiles.length, 16)}`}>
+          {voiceUsers.length === 0 && !joined && (
+            <p className="voice-empty">No one is in this channel</p>
+          )}
+          {sortedTiles.map((t) => renderTile(t, false, false))}
+        </div>
+      )}
 
       {/* Hidden container for remote audio elements */}
       <div ref={remoteAudioRef} style={{ display: 'none' }} />

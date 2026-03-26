@@ -13,7 +13,6 @@ const ICE_SERVERS: RTCConfiguration = {
 export class PeerConnection {
   pc: RTCPeerConnection
   localStream: MediaStream | null = null
-  remoteStream: MediaStream = new MediaStream()
   onIceCandidate: ((candidate: RTCIceCandidateInit) => void) | null = null
   onRemoteStream: ((stream: MediaStream) => void) | null = null
 
@@ -27,10 +26,10 @@ export class PeerConnection {
     }
 
     this.pc.ontrack = (ev) => {
-      ev.streams[0]?.getTracks().forEach((track) => {
-        this.remoteStream.addTrack(track)
-      })
-      this.onRemoteStream?.(this.remoteStream)
+      const stream = ev.streams[0]
+      if (stream) {
+        this.onRemoteStream?.(stream)
+      }
     }
   }
 

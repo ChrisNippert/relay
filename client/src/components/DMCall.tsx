@@ -20,19 +20,40 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
   const [muted, setMuted] = useState(false)
   const [videoOn, setVideoOn] = useState(startWithVideo)
   const [screenSharing, setScreenSharing] = useState(false)
+  const [remoteScreening, setRemoteScreening] = useState(false)
   const [callState, setCallState] = useState<'calling' | 'connected'>('calling')
+  const [isFullscreen, setIsFullscreen] = useState(false)
 
   const pcRef = useRef<PeerConnection | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
   const remoteAudioRef = useRef<HTMLAudioElement>(null)
+  const remoteScreenRef = useRef<HTMLVideoElement>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const connectedRef = useRef(false)
+  const primaryStreamIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     startCall()
     return () => { cleanupCall() }
   }, [])
+
+  // Fullscreen change listener
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', handler)
+    return () => document.removeEventListener('fullscreenchange', handler)
+  }, [])
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen()
+    } else {
+      containerRef.current?.requestFullscreen()
+    }
+  }
 
   // Listen for signaling
   useEffect(() => {
@@ -94,16 +115,45 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
 
       pc.onRemoteStream = (remoteStream) => {
         const settings = getSettings()
-        if (remoteStream.getVideoTracks().length > 0 && remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = remoteStream
-          remoteVideoRef.current.volume = settings.outputVolume / 100
-        } else if (remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = remoteStream
-          remoteAudioRef.current.volume = settings.outputVolume / 100
+
+        // Track primary stream (camera/audio) vs screen share
+        if (!primaryStreamIdRef.current) {
+          primaryStreamIdRef.current = remoteStream.id
         }
-        setConnected(true)
-        setCallState('connected')
-        playConnectedSound()
+
+        if (remoteStream.id === primaryStreamIdRef.current) {
+          // Primary stream — video + audio
+          if (remoteStream.getVideoTracks().length > 0 && remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = remoteStream
+            remoteVideoRef.current.volume = settings.outputVolume / 100
+          }
+          if (remoteAudioRef.current) {
+            remoteAudioRef.current.srcObject = remoteStream
+            remoteAudioRef.current.volume = settings.outputVolume / 100
+          }
+        } else {
+          // Screen share stream
+          if (remoteScreenRef.current) {
+            remoteScreenRef.current.srcObject = remoteStream
+          }
+          setRemoteScreening(true)
+
+          const checkEnded = () => {
+            if (remoteStream.getTracks().length === 0 || remoteStream.getTracks().every(t => t.readyState === 'ended')) {
+              setRemoteScreening(false)
+              if (remoteScreenRef.current) remoteScreenRef.current.srcObject = null
+            }
+          }
+          remoteStream.addEventListener('removetrack', checkEnded)
+          remoteStream.getTracks().forEach(t => t.addEventListener('ended', checkEnded))
+        }
+
+        if (!connectedRef.current) {
+          connectedRef.current = true
+          setConnected(true)
+          setCallState('connected')
+          playConnectedSound()
+        }
       }
 
       const offer = await pc.createOffer()
@@ -204,20 +254,38 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
     if (screenSharing) {
       screenStreamRef.current?.getTracks().forEach((t) => {
         t.stop()
-        localStreamRef.current?.removeTrack(t)
+        if (pcRef.current) {
+          const sender = pcRef.current.pc.getSenders().find(s => s.track === t)
+          if (sender) pcRef.current.pc.removeTrack(sender)
+        }
       })
       screenStreamRef.current = null
       setScreenSharing(false)
+      // Renegotiate
+      if (pcRef.current) {
+        const offer = await pcRef.current.createOffer()
+        sendCallOffer(targetUserId, channelId, offer)
+      }
     } else {
       try {
         const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
         screenStreamRef.current = screenStream
         screenStream.getTracks().forEach((t) => {
-          localStreamRef.current?.addTrack(t)
-          pcRef.current?.pc.addTrack(t, localStreamRef.current!)
+          // Add with screenStream as the stream param so remote gets a separate stream
+          pcRef.current?.pc.addTrack(t, screenStream)
           t.onended = () => {
+            if (pcRef.current) {
+              const sender = pcRef.current.pc.getSenders().find(s => s.track === t)
+              if (sender) pcRef.current.pc.removeTrack(sender)
+            }
             setScreenSharing(false)
             screenStreamRef.current = null
+            // Renegotiate
+            if (pcRef.current) {
+              pcRef.current.createOffer().then(offer => {
+                sendCallOffer(targetUserId, channelId, offer)
+              })
+            }
           }
         })
         setScreenSharing(true)
@@ -233,29 +301,38 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
   }
 
   return (
-    <div className="dm-call">
+    <div className="dm-call" ref={containerRef}>
       <div className="dm-call-header">
         <span className="dm-call-status">
           {callState === 'calling' ? `Calling ${targetName}...` : `In call with ${targetName}`}
         </span>
+        {connected && (
+          <button className="voice-fullscreen-btn" onClick={toggleFullscreen} title={isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}>
+            {isFullscreen ? '⊠' : '⛶'}
+          </button>
+        )}
       </div>
 
       <div className="dm-call-media">
-        {(videoOn || connected) && (
-          <div className="dm-call-videos">
-            {connected && (
-              <div className="video-tile remote-video">
-                <video ref={remoteVideoRef} autoPlay playsInline />
-                <span className="video-tile-name">{targetName}</span>
-              </div>
-            )}
-            {videoOn && (
-              <div className="video-tile self-video-small">
-                <video ref={localVideoRef} autoPlay playsInline muted />
-              </div>
-            )}
-          </div>
-        )}
+        <div className="dm-call-videos">
+          {remoteScreening && (
+            <div className="video-tile remote-screen">
+              <video ref={remoteScreenRef} autoPlay playsInline />
+              <span className="video-tile-name">{targetName}'s screen</span>
+            </div>
+          )}
+          {connected && (
+            <div className={`video-tile remote-video ${remoteScreening ? 'pip' : ''}`}>
+              <video ref={remoteVideoRef} autoPlay playsInline />
+              <span className="video-tile-name">{targetName}</span>
+            </div>
+          )}
+          {videoOn && (
+            <div className="video-tile self-video-small">
+              <video ref={localVideoRef} autoPlay playsInline muted />
+            </div>
+          )}
+        </div>
         <audio ref={remoteAudioRef} autoPlay />
       </div>
 

@@ -1578,19 +1578,35 @@ html, body, #root {
   grid-template-rows: 1fr 1fr 1fr 1fr;
 }
 
-/* Focused layout: first item large, rest in sidebar strip */
-.voice-tile-grid.has-focused {
-  grid-template-columns: 1fr 200px;
-  grid-template-rows: 1fr;
+/* Focused layout: large tile + scrollable sidebar */
+.voice-tile-grid.focused-layout {
+  display: flex;
+  gap: 8px;
 }
 
-.voice-tile-grid.has-focused .voice-tile.focused {
-  grid-row: 1 / -1;
-  grid-column: 1;
+.voice-focused-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
 }
 
-.voice-tile-grid.has-focused .voice-tile.unfocused {
-  grid-column: 2;
+.voice-focused-main .voice-tile {
+  flex: 1;
+}
+
+.voice-focused-sidebar {
+  width: 200px;
+  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.voice-focused-sidebar .voice-tile {
+  flex: 0 0 auto;
+  min-height: 120px;
 }
 
 /* Individual voice tile */
@@ -1829,6 +1845,30 @@ html, body, #root {
 
 .voice-leave-btn:hover {
   background: #d63851;
+}
+
+/* Fullscreen button */
+.voice-fullscreen-btn {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: color 0.2s, background 0.2s;
+}
+
+.voice-fullscreen-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Fullscreen mode */
+.voice-channel:fullscreen,
+.dm-call:fullscreen {
+  background: var(--bg-primary);
 }
 
 /* Settings Overlay */
@@ -2139,7 +2179,10 @@ html, body, #root {
 
 .dm-call-header {
   padding: 16px;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -2154,19 +2197,64 @@ html, body, #root {
   align-items: center;
   justify-content: center;
   padding: 16px;
+  position: relative;
 }
 
 .dm-call-videos {
   display: flex;
   gap: 12px;
-  flex-wrap: wrap;
   justify-content: center;
   width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.dm-call-videos .remote-screen {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+}
+
+.dm-call-videos .remote-screen video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
 }
 
 .dm-call-videos .remote-video {
   flex: 1;
   max-width: 640px;
+  position: relative;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+}
+
+.dm-call-videos .remote-video video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.dm-call-videos .remote-video.pip {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  width: 180px;
+  max-width: 180px;
+  flex: none;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  z-index: 10;
+}
+
+.dm-call-videos .remote-video.pip video {
+  height: auto;
 }
 
 .dm-call-videos .self-video-small {
@@ -2183,6 +2271,20 @@ html, body, #root {
 .dm-call-videos .self-video-small video {
   width: 100%;
   display: block;
+}
+
+.video-tile-name {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 6px 10px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+  color: white;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
 }
 
 .dm-call-controls {
