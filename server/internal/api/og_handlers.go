@@ -68,8 +68,14 @@ func OGHandler() http.HandlerFunc {
 		// Block private/internal IPs to prevent SSRF
 		host := strings.ToLower(parsed.Hostname())
 		if host == "localhost" || host == "127.0.0.1" || host == "::1" ||
+			host == "0.0.0.0" || host == "" ||
 			strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "192.168.") ||
-			strings.HasPrefix(host, "0.") || host == "metadata.google.internal" {
+			strings.HasPrefix(host, "0.") || host == "metadata.google.internal" ||
+			strings.HasPrefix(host, "169.254.") ||
+			strings.HasPrefix(host, "fc00:") || strings.HasPrefix(host, "fd") ||
+			strings.HasPrefix(host, "fe80:") ||
+			strings.HasPrefix(host, "[::ffff:") ||
+			strings.Contains(host, "[:") {
 			http.Error(w, `{"error":"url not allowed"}`, http.StatusBadRequest)
 			return
 		}

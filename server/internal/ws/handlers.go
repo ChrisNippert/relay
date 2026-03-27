@@ -252,6 +252,12 @@ func handleTyping(c *Client, payload json.RawMessage, started bool) {
 		return
 	}
 
+	// Verify the user is a participant of this channel
+	hasAccess, err := c.hub.db.IsChannelParticipant(p.ChannelID, c.userID)
+	if err != nil || !hasAccess {
+		return
+	}
+
 	typeName := "typing_stop"
 	if started {
 		typeName = "typing_start"
@@ -280,6 +286,14 @@ func handleCallSignal(c *Client, signalType string, payload json.RawMessage) {
 		return
 	}
 
+	// Verify the user is a participant of this channel
+	if p.ChannelID != "" {
+		hasAccess, err := c.hub.db.IsChannelParticipant(p.ChannelID, c.userID)
+		if err != nil || !hasAccess {
+			return
+		}
+	}
+
 	msg := WSMessage{
 		Type: signalType,
 		Payload: json.RawMessage(mustMarshal(map[string]interface{}{
@@ -302,6 +316,12 @@ func handleVoiceJoin(c *Client, payload json.RawMessage) {
 		return
 	}
 
+	// Verify the user is a participant of this channel
+	hasAccess, err := c.hub.db.IsChannelParticipant(p.ChannelID, c.userID)
+	if err != nil || !hasAccess {
+		return
+	}
+
 	users := c.hub.VoiceJoin(p.ChannelID, c.userID)
 
 	// Broadcast updated voice state to the channel
@@ -319,6 +339,12 @@ func handleVoiceJoin(c *Client, payload json.RawMessage) {
 func handleVoiceLeave(c *Client, payload json.RawMessage) {
 	var p voicePayload
 	if err := json.Unmarshal(payload, &p); err != nil {
+		return
+	}
+
+	// Verify the user is a participant of this channel
+	hasAccess, err := c.hub.db.IsChannelParticipant(p.ChannelID, c.userID)
+	if err != nil || !hasAccess {
 		return
 	}
 

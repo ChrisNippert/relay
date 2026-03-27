@@ -133,19 +133,9 @@ func DeleteServerHandler(database *db.DB) http.HandlerFunc {
 
 func JoinServerHandler(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		serverID := chi.URLParam(r, "serverID")
-
-		if _, err := database.GetServer(serverID); err != nil {
-			http.Error(w, `{"error":"server not found"}`, http.StatusNotFound)
-			return
-		}
-
-		if err := database.AddServerMember(serverID, GetUserID(r), "member"); err != nil {
-			http.Error(w, `{"error":"failed to join server"}`, http.StatusInternalServerError)
-			return
-		}
-
-		w.WriteHeader(http.StatusNoContent)
+		// Direct join is disabled — users must join via invite code.
+		// Use POST /api/invites/{code}/join instead.
+		http.Error(w, `{"error":"direct join is disabled, use an invite link"}`, http.StatusForbidden)
 	}
 }
 

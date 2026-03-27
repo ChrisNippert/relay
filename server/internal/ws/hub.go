@@ -81,17 +81,63 @@ func (h *Hub) broadcastPresence(userID, status string) {
 	}
 	data := mustMarshal(msg)
 
+	// Only send presence to users who share a server with this user
+	peerIDs := h.getRelatedUserIDs(userID)
+
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	for _, conns := range h.clients {
-		for client := range conns {
+	for _, peerID := range peerIDs {
+		for client := range h.clients[peerID] {
 			select {
 			case client.send <- data:
 			default:
 			}
 		}
 	}
+}
+
+// getRelatedUserIDs returns user IDs who share at least one server with the given user.
+func (h *Hub) getRelatedUserIDs(userID string) []string {
+	servers, err := h.db.GetServersByUser(userID)
+	if err != nil {
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	for _, s := range servers {
+		members, err := h.db.GetServerMembers(s.ID)
+		if err != nil {
+			continue
+		}
+		for _, m := range members {
+			if m.UserID != userID {
+				seen[m.UserID] = true
+			}
+		}
+	}
+
+	// Also include DM partners
+	dmChannels, err := h.db.GetDMChannels(userID)
+	if err == nil {
+		for _, ch := range dmChannels {
+			participants, err := h.db.GetDMParticipants(ch.ID)
+			if err != nil {
+				continue
+			}
+			for _, p := range participants {
+				if p != userID {
+					seen[p] = true
+				}
+			}
+		}
+	}
+
+	ids := make([]string, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 // SendToUser sends a message to all active connections for a user.

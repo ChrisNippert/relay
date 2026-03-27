@@ -111,6 +111,14 @@ func SearchUsersHandler(database *db.DB) http.HandlerFunc {
 func GetOnlineUsersHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		serverID := chi.URLParam(r, "serverID")
+
+		// Verify the user is a member of this server
+		isMember, err := database.IsServerMember(serverID, GetUserID(r))
+		if err != nil || !isMember {
+			http.Error(w, `{"error":"not a member of this server"}`, http.StatusForbidden)
+			return
+		}
+
 		members, err := database.GetServerMembers(serverID)
 		if err != nil {
 			http.Error(w, `{"error":"failed to get members"}`, http.StatusInternalServerError)

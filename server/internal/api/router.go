@@ -41,12 +41,12 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 	r.Get("/ws", ws.HandleWebSocket(hub, cfg))
 	r.Get("/api/ws", ws.HandleWebSocket(hub, cfg))
 
-	// File downloads (public — UUIDs are unguessable)
-	r.Get("/api/files/{fileID}", DownloadHandler(cfg))
-
 	// Authenticated routes
 	r.Group(func(r chi.Router) {
 		r.Use(AuthMiddleware(cfg))
+
+		// File downloads (require authentication)
+		r.Get("/api/files/{fileID}", DownloadHandler(cfg))
 
 		// Users
 		r.Get("/api/users/me", GetMeHandler(database))
@@ -100,7 +100,7 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		r.Get("/api/messages/{messageID}/history", GetEditHistoryHandler(database))
 
 		// Voice state
-		r.Get("/api/channels/{channelID}/voice-users", GetVoiceUsersHandler(hub))
+		r.Get("/api/channels/{channelID}/voice-users", GetVoiceUsersHandler(database, hub))
 
 		// Channel keys (E2E encryption)
 		r.Get("/api/channels/{channelID}/keys", GetChannelKeysHandler(database))
