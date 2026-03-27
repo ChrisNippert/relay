@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -50,8 +51,7 @@ func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			cfg.JWTSecret = generateSecret()
-			log.Println("WARNING: No config file found. Generated a random JWT secret for this session. Set jwt_secret in config.yaml for persistence across restarts.")
+			cfg.JWTSecret = loadOrGenerateSecret(path)
 			return cfg, nil
 		}
 		return nil, err
@@ -65,15 +65,35 @@ func Load(path string) (*Config, error) {
 	trimmed := strings.TrimSpace(cfg.JWTSecret)
 	for _, bad := range insecureDefaults {
 		if trimmed == bad {
-			cfg.JWTSecret = generateSecret()
-			log.Println("WARNING: jwt_secret in config is an insecure default. Generated a random secret for this session. Please set a strong jwt_secret in config.yaml.")
+			cfg.JWTSecret = loadOrGenerateSecret(path)
+			log.Println("WARNING: jwt_secret in config is an insecure default. Please set a strong jwt_secret in config.yaml.")
 			break
 		}
 	}
 	if trimmed == "" {
-		cfg.JWTSecret = generateSecret()
-		log.Println("WARNING: jwt_secret is empty. Generated a random secret for this session.")
+		cfg.JWTSecret = loadOrGenerateSecret(path)
 	}
 
 	return cfg, nil
+}
+
+// loadOrGenerateSecret reads a persisted secret from .jwt_secret next to the
+// config file, or generates a new one and saves it so tokens survive restarts.
+func loadOrGenerateSecret(configPath string) string {
+	secretPath := filepath.Join(filepath.Dir(configPath), ".jwt_secret")
+
+	if data, err := os.ReadFile(secretPath); err == nil {
+		if s := strings.TrimSpace(string(data)); s != "" {
+			log.Println("INFO: Using persisted JWT secret from", secretPath)
+			return s
+		}
+	}
+
+	secret := generateSecret()
+	if err := os.WriteFile(secretPath, []byte(secret+"\n"), 0600); err != nil {
+		log.Printf("WARNING: Could not persist JWT secret to %s: %v (secret will be lost on restart)", secretPath, err)
+	} else {
+		log.Printf("INFO: Generated and saved JWT secret to %s", secretPath)
+	}
+	return secret
 }
