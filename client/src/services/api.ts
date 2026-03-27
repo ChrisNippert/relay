@@ -148,6 +148,8 @@ export const getChannelKeys = (channelId: string) =>
   request<ChannelKey[]>('GET', `/channels/${encodeURIComponent(channelId)}/keys`)
 export const setChannelKey = (channelId: string, encrypted_key: string, user_id?: string) =>
   request<void>('POST', `/channels/${encodeURIComponent(channelId)}/keys`, { encrypted_key, ...(user_id ? { user_id } : {}) })
+export const deleteChannelKeys = (channelId: string) =>
+  request<void>('DELETE', `/channels/${encodeURIComponent(channelId)}/keys`)
 export const deleteMyChannelKeys = () =>
   request<void>('DELETE', '/users/me/channel-keys')
 

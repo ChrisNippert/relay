@@ -85,3 +85,22 @@ func SetChannelKeyHandler(database *db.DB) http.HandlerFunc {
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
+
+func DeleteChannelKeysHandler(database *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		channelID := chi.URLParam(r, "channelID")
+
+		hasAccess, err := database.IsChannelParticipant(channelID, GetUserID(r))
+		if err != nil || !hasAccess {
+			http.Error(w, `{"error":"access denied"}`, http.StatusForbidden)
+			return
+		}
+
+		if err := database.DeleteAllChannelKeys(channelID); err != nil {
+			http.Error(w, `{"error":"failed to delete keys"}`, http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}

@@ -372,10 +372,21 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
             return next
           })
         }
+      } else if (msg.type === 'member_joined' || msg.type === 'member_left' || msg.type === 'member_kicked') {
+        // Rotate E2E keys when membership changes so new/departed members
+        // cannot decrypt messages from before/after the change
+        if (encrypted && channel.server_id) {
+          const p = msg.payload as { server_id: string }
+          if (p.server_id === channel.server_id) {
+            e2e.rotateKeys(channel.id, channel.server_id).then((ok) => {
+              if (ok) setEncryptionReady(true)
+            })
+          }
+        }
       }
     })
     return unsub
-  }, [channel.id, user?.id, resolveUserName])
+  }, [channel.id, channel.server_id, user?.id, encrypted, resolveUserName])
 
   // Scroll to bottom on initial load; smooth-scroll for new messages
   useEffect(() => {
@@ -566,6 +577,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     }
     setEditingMsg(null)
     setInlineEditText('')
+    setTimeout(() => inputRef.current?.focus(), 0)
   }
 
   const handleInlineEditCancel = () => {
@@ -853,6 +865,9 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                         if (el) {
                           el.style.height = 'auto'
                           el.style.height = Math.min(el.scrollHeight, 300) + 'px'
+                          // Place cursor at end of text
+                          const len = el.value.length
+                          el.setSelectionRange(len, len)
                         }
                       }}
                     />

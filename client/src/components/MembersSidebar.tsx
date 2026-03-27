@@ -77,6 +77,23 @@ export default function MembersSidebar({ serverId, onMessage, isAdmin }: Members
         if (payload.server_id === serverId) {
           setMembers((prev) => prev.filter((m) => m.user.id !== payload.user_id))
         }
+      } else if (msg.type === 'member_joined') {
+        const payload = msg.payload as { user_id: string; server_id: string }
+        if (payload.server_id === serverId) {
+          // Fetch the new member's info and add them
+          api.getUser(payload.user_id).then((u) => {
+            setMembers((prev) => {
+              if (prev.some((m) => m.user.id === u.id)) return prev
+              return [...prev, { member: { server_id: serverId, user_id: u.id, role: 'member', joined_at: new Date().toISOString() }, user: u }]
+            })
+            setOnlineUserIds((prev) => new Set(prev).add(payload.user_id))
+          }).catch(() => {})
+        }
+      } else if (msg.type === 'member_left') {
+        const payload = msg.payload as { user_id: string; server_id: string }
+        if (payload.server_id === serverId) {
+          setMembers((prev) => prev.filter((m) => m.user.id !== payload.user_id))
+        }
       }
     })
     return unsub

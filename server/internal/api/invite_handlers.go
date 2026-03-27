@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/relay-chat/relay/internal/db"
+	"github.com/relay-chat/relay/internal/ws"
 )
 
 type createInviteRequest struct {
@@ -85,7 +86,7 @@ func GetInvitesHandler(database *db.DB) http.HandlerFunc {
 	}
 }
 
-func JoinByInviteHandler(database *db.DB) http.HandlerFunc {
+func JoinByInviteHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		code := chi.URLParam(r, "code")
 		userID := GetUserID(r)
@@ -136,6 +137,12 @@ func JoinByInviteHandler(database *db.DB) http.HandlerFunc {
 			http.Error(w, `{"error":"server not found"}`, http.StatusNotFound)
 			return
 		}
+
+		// Broadcast member_joined to all server members
+		broadcastChannelEvent(hub, invite.ServerID, "member_joined", map[string]string{
+			"server_id": invite.ServerID,
+			"user_id":   userID,
+		})
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(server)

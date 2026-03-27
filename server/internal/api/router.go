@@ -81,7 +81,7 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		r.Put("/api/servers/{serverID}", UpdateServerHandler(database))
 		r.Delete("/api/servers/{serverID}", DeleteServerHandler(database))
 		r.Post("/api/servers/{serverID}/join", JoinServerHandler(database))
-		r.Post("/api/servers/{serverID}/leave", LeaveServerHandler(database))
+		r.Post("/api/servers/{serverID}/leave", LeaveServerHandler(database, hub))
 		r.Get("/api/servers/{serverID}/members", GetMembersHandler(database))
 		r.Get("/api/servers/{serverID}/online", GetOnlineUsersHandler(database, hub))
 		r.Put("/api/servers/{serverID}/members/{userID}/role", UpdateMemberRoleHandler(database, hub))
@@ -90,7 +90,7 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		// Server invites
 		r.Post("/api/servers/{serverID}/invites", CreateInviteHandler(database))
 		r.Get("/api/servers/{serverID}/invites", GetInvitesHandler(database))
-		r.Post("/api/invites/{code}/join", JoinByInviteHandler(database))
+		r.Post("/api/invites/{code}/join", JoinByInviteHandler(database, hub))
 		r.Delete("/api/invites/{inviteID}", DeleteInviteHandler(database))
 
 		// Channels
@@ -118,6 +118,7 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		// Channel keys (E2E encryption)
 		r.Get("/api/channels/{channelID}/keys", GetChannelKeysHandler(database))
 		r.Post("/api/channels/{channelID}/keys", SetChannelKeyHandler(database))
+		r.Delete("/api/channels/{channelID}/keys", DeleteChannelKeysHandler(database))
 		r.Delete("/api/users/me/channel-keys", DeleteMyChannelKeysHandler(database))
 
 		// File upload

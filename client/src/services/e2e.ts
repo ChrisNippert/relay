@@ -236,3 +236,48 @@ export function isEncryptedContent(content: string): boolean {
 export function clearChannelKey(channelId: string) {
   channelKeyCache.delete(channelId)
 }
+
+/**
+ * Rotate the channel key: wipe all existing keys, generate a fresh key,
+ * and distribute it to all current members. Old messages encrypted with
+ * the previous key become undecryptable for new/departed members.
+ */
+export async function rotateKeys(channelId: string, serverId?: string): Promise<boolean> {
+  const privKey = getPrivateKey()
+  if (!privKey) return false
+
+  try {
+    // Wipe all existing keys from the server
+    await api.deleteChannelKeys(channelId)
+
+    // Clear local cache so we don't use the old key
+    channelKeyCache.delete(channelId)
+
+    // Generate a brand new channel key
+    const channelKey = await crypto.generateChannelKey()
+    const channelKeyB64 = await crypto.exportKey(channelKey)
+
+    // Get current members
+    let memberIds: string[]
+    if (serverId) {
+      const members = await api.getMembers(serverId)
+      memberIds = members.map(m => m.user_id)
+    } else {
+      memberIds = await api.getDMParticipants(channelId)
+    }
+
+    // Encrypt the new key for every current member who has a public key
+    for (const memberId of memberIds) {
+      const member = await api.getUser(memberId)
+      if (!member.public_key) continue
+      const encryptedKey = await buildEncryptedKey(privKey, member.public_key, channelKeyB64)
+      await api.setChannelKey(channelId, encryptedKey, memberId)
+    }
+
+    channelKeyCache.set(channelId, channelKey)
+    return true
+  } catch (e) {
+    console.error('Failed to rotate channel keys:', e)
+    return false
+  }
+}

@@ -11,10 +11,11 @@ interface Props {
   targetName: string
   channelId: string
   startWithVideo: boolean
+  incomingOffer?: RTCSessionDescriptionInit
   onEnd: () => void
 }
 
-export default function DMCall({ targetUserId, targetName, channelId, startWithVideo, onEnd }: Props) {
+export default function DMCall({ targetUserId, targetName, channelId, startWithVideo, incomingOffer, onEnd }: Props) {
   const { user } = useAuth()
   const [connected, setConnected] = useState(false)
   const [muted, setMuted] = useState(false)
@@ -36,7 +37,7 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
   const primaryStreamIdRef = useRef<string | null>(null)
 
   useEffect(() => {
-    startCall()
+    startCall(incomingOffer)
     return () => { cleanupCall() }
   }, [])
 
@@ -84,13 +85,13 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
     return unsub
   }, [targetUserId])
 
-  async function startCall() {
+  async function startCall(remoteOffer?: RTCSessionDescriptionInit) {
     try {
       const settings = getSettings()
       const audioConstraint: MediaTrackConstraints | boolean = settings.audioInputDevice
         ? { deviceId: { exact: settings.audioInputDevice } }
         : true
-      const videoConstraint: MediaTrackConstraints | boolean = startWithVideo
+      const videoConstraint: MediaTrackConstraints | boolean = (!remoteOffer && startWithVideo)
         ? (settings.videoDevice ? { deviceId: { exact: settings.videoDevice } } : true)
         : false
 
@@ -100,7 +101,7 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
       })
       localStreamRef.current = stream
 
-      if (startWithVideo && localVideoRef.current) {
+      if (!remoteOffer && startWithVideo && localVideoRef.current) {
         localVideoRef.current.srcObject = stream
       }
 
@@ -156,9 +157,16 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
         }
       }
 
-      const offer = await pc.createOffer()
-      sendCallOffer(targetUserId, channelId, offer)
-      playCallRing()
+      if (remoteOffer) {
+        // Receiver: answer the incoming offer
+        const answer = await pc.handleOffer(remoteOffer)
+        sendCallAnswer(targetUserId, channelId, answer)
+      } else {
+        // Caller: create and send offer
+        const offer = await pc.createOffer()
+        sendCallOffer(targetUserId, channelId, offer)
+        playCallRing()
+      }
     } catch (err) {
       console.error('Failed to start call:', err)
       playErrorSound()

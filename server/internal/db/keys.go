@@ -36,6 +36,16 @@ func (db *DB) DeleteChannelKeysForUser(userID string) error {
 	return err
 }
 
+func (db *DB) DeleteChannelKeyForUser(channelID, userID string) error {
+	_, err := db.Exec(`DELETE FROM channel_keys WHERE channel_id = ? AND user_id = ?`, channelID, userID)
+	return err
+}
+
+func (db *DB) DeleteAllChannelKeys(channelID string) error {
+	_, err := db.Exec(`DELETE FROM channel_keys WHERE channel_id = ?`, channelID)
+	return err
+}
+
 func (db *DB) GetChannelKeyForUser(channelID, userID string) (*models.ChannelKey, error) {
 	k := &models.ChannelKey{}
 	err := db.QueryRow(

@@ -139,7 +139,7 @@ func JoinServerHandler(database *db.DB) http.HandlerFunc {
 	}
 }
 
-func LeaveServerHandler(database *db.DB) http.HandlerFunc {
+func LeaveServerHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		serverID := chi.URLParam(r, "serverID")
 		userID := GetUserID(r)
@@ -159,6 +159,12 @@ func LeaveServerHandler(database *db.DB) http.HandlerFunc {
 			http.Error(w, `{"error":"failed to leave server"}`, http.StatusInternalServerError)
 			return
 		}
+
+		// Broadcast member_left to all remaining server members
+		broadcastChannelEvent(hub, serverID, "member_left", map[string]string{
+			"server_id": serverID,
+			"user_id":   userID,
+		})
 
 		w.WriteHeader(http.StatusNoContent)
 	}

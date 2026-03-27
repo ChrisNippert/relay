@@ -27,8 +27,8 @@ export default function Home() {
   const selectedChannelRef = useRef<Channel | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [showServerSettings, setShowServerSettings] = useState(false)
-  const [dmCall, setDmCall] = useState<{ userId: string; name: string; channelId: string; video: boolean } | null>(null)
-  const [incomingCall, setIncomingCall] = useState<{ fromUserId: string; fromName: string; channelId: string } | null>(null)
+  const [dmCall, setDmCall] = useState<{ userId: string; name: string; channelId: string; video: boolean; incomingOffer?: RTCSessionDescriptionInit } | null>(null)
+  const [incomingCall, setIncomingCall] = useState<{ fromUserId: string; fromName: string; channelId: string; offer: RTCSessionDescriptionInit } | null>(null)
   const [activeVoiceChannel, setActiveVoiceChannel] = useState<Channel | null>(null)
   const voiceRef = useRef<VoiceChannelHandle>(null)
   const [voiceControls, setVoiceControls] = useState({
@@ -72,14 +72,16 @@ export default function Home() {
           playMessageSound()
         }
       } else if (msg.type === 'call_offer') {
-        const payload = msg.payload as { from_user_id?: string; channel_id?: string }
+        const payload = msg.payload as { from_user_id?: string; channel_id?: string; signal?: RTCSessionDescriptionInit }
         if (payload.from_user_id && payload.from_user_id !== user?.id && !dmCall) {
-          // Check if this is a DM call (not a server voice channel)
+          // Skip voice channel renegotiation offers
+          if (activeVoiceChannel && payload.channel_id === activeVoiceChannel.id) return
           api.getUser(payload.from_user_id).then((u) => {
             setIncomingCall({
               fromUserId: payload.from_user_id!,
               fromName: u.display_name,
               channelId: payload.channel_id || '',
+              offer: payload.signal!,
             })
             playCallRing()
           }).catch(() => {})
@@ -87,7 +89,7 @@ export default function Home() {
       }
     })
     return unsub
-  }, [user?.id, dmCall])
+  }, [user?.id, dmCall, activeVoiceChannel?.id])
 
   // Load servers on mount
   useEffect(() => {
@@ -285,6 +287,7 @@ export default function Home() {
       name: incomingCall.fromName,
       channelId: incomingCall.channelId,
       video: false,
+      incomingOffer: incomingCall.offer,
     })
     setIncomingCall(null)
   }
@@ -477,6 +480,7 @@ export default function Home() {
               targetName={dmCall.name}
               channelId={dmCall.channelId}
               startWithVideo={dmCall.video}
+              incomingOffer={dmCall.incomingOffer}
               onEnd={() => setDmCall(null)}
             />
           ) : selectedChannel && !isVoiceChannel ? (
