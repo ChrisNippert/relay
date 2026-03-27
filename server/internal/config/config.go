@@ -1,9 +1,9 @@
 package config
 
 import (
-"os"
+	"os"
 
-"gopkg.in/yaml.v3"
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
@@ -15,6 +15,7 @@ type Config struct {
 	MaxUploadMB  int    `yaml:"max_upload_mb"`
 	TLSCert      string `yaml:"tls_cert"`
 	TLSKey       string `yaml:"tls_key"`
+	StaticDir    string `yaml:"static_dir"`
 }
 
 func Load(path string) (*Config, error) {

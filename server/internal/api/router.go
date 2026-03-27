@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -111,6 +113,19 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		// OpenGraph metadata
 		r.Get("/api/og", OGHandler())
 	})
+
+	// Serve static frontend files with SPA fallback
+	if cfg.StaticDir != "" {
+		fileServer := http.FileServer(http.Dir(cfg.StaticDir))
+		r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
+			fsPath := filepath.Join(cfg.StaticDir, filepath.Clean("/"+req.URL.Path))
+			if _, err := os.Stat(fsPath); os.IsNotExist(err) {
+				http.ServeFile(w, req, filepath.Join(cfg.StaticDir, "index.html"))
+				return
+			}
+			fileServer.ServeHTTP(w, req)
+		})
+	}
 
 	return r
 }
