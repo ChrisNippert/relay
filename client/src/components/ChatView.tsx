@@ -181,7 +181,7 @@ function LinkEmbed({ url, onImageLoad }: { url: string; onImageLoad?: () => void
   )
 }
 
-export default function ChatView({ channel, onStartCall, onDMUser, showMembersToggle, showMembers, onToggleMembers, isAdmin, serverId }: Props) {
+export default function ChatView({ channel, onStartCall, onDMUser, showMembersToggle, showMembers, onToggleMembers, isAdmin, serverId: _serverId }: Props) {
   const { user } = useAuth()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')

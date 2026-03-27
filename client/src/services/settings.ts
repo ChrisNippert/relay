@@ -216,6 +216,6 @@ export function applyTheme(theme: Theme) {
 
 export function loadAndApplyTheme() {
   const id = getThemeId()
-  const theme = THEME_PRESETS.find((t) => t.id === id) || THEME_PRESETS[0]
+  const theme = THEME_PRESETS.find((t) => t.id === id) || THEME_PRESETS[0]!
   applyTheme(theme)
 }
