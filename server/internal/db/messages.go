@@ -51,7 +51,7 @@ func (db *DB) getMessageShallow(id string) (*models.Message, error) {
 	var replyToID sql.NullString
 	var username, displayName, avatarURL, nameColor string
 	err := db.QueryRow(
-		`SELECT m.id, m.channel_id, m.user_id, m.content, m.type, m.reply_to_id, m.edited, m.created_at,
+		`SELECT m.id, m.channel_id, m.user_id, m.content, m.type, m.reply_to_id, m.edited, m.deleted, m.created_at,
 		        u.username, u.display_name, u.avatar_url, u.name_color
 		 FROM messages m
 		 JOIN users u ON m.user_id = u.id

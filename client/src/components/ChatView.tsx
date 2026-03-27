@@ -218,6 +218,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const initialLoadRef = useRef(true)
   const userNameCache = useRef<Map<string, string>>(new Map())
+  const pendingCountRef = useRef(0)
   const seenMsgIds = useRef(new Set<string>())
 
   // Resolve DM partner for call buttons and header name
@@ -297,6 +298,9 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     setHasMore(true)
     setReplyingTo(null)
     setEditingMsg(null)
+    setPendingFiles([])
+    setUploading(false)
+    pendingCountRef.current = 0
     setInitialScrollDone(false)
     initialLoadRef.current = true
     api.getMessages(channel.id).then(async (msgs) => {
@@ -493,10 +497,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
 
     // Wait for any still-uploading files
     const stillUploading = pendingFiles.some(f => !f.id && !f.error)
-    if (stillUploading) {
-      setUploading(true)
-      return // user will retry; uploads finish in background
-    }
+    if (stillUploading) return // user will retry once uploads finish
 
     const attachmentIds = pendingFiles.filter(f => f.id).map(f => f.id!)
     setPendingFiles([])
@@ -584,22 +585,23 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
 
   const startUpload = useCallback((files: File[]) => {
     const newEntries = files.map(file => ({ file, progress: 0 }))
-    setPendingFiles(prev => {
-      const updated = [...prev, ...newEntries]
-      // Kick off uploads for the new entries
-      newEntries.forEach((entry, offset) => {
-        const idx = prev.length + offset
-        api.uploadFile(entry.file, (pct) => {
-          setPendingFiles(cur => cur.map((f, i) => i === idx ? { ...f, progress: pct } : f))
-        }).then(res => {
-          setPendingFiles(cur => cur.map((f, i) => i === idx ? { ...f, id: res.id, progress: 100 } : f))
-        }).catch((err) => {
-          const msg = err?.message || 'Upload failed'
-          console.error('Upload error:', msg)
-          setPendingFiles(cur => cur.map((f, i) => i === idx ? { ...f, error: msg, progress: 0 } : f))
-        })
+    const baseIdx = pendingCountRef.current
+    pendingCountRef.current += newEntries.length
+
+    setPendingFiles(prev => [...prev, ...newEntries])
+
+    // Fire uploads outside the state updater to avoid duplicate calls in StrictMode
+    newEntries.forEach((entry, offset) => {
+      const idx = baseIdx + offset
+      api.uploadFile(entry.file, (pct) => {
+        setPendingFiles(cur => cur.map((f, i) => i === idx ? { ...f, progress: pct } : f))
+      }).then(res => {
+        setPendingFiles(cur => cur.map((f, i) => i === idx ? { ...f, id: res.id, progress: 100 } : f))
+      }).catch((err) => {
+        const msg = err?.message || 'Upload failed'
+        console.error('Upload error:', msg)
+        setPendingFiles(cur => cur.map((f, i) => i === idx ? { ...f, error: msg, progress: 0 } : f))
       })
-      return updated
     })
   }, [])
 
