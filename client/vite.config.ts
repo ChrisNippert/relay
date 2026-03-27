@@ -7,12 +7,12 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        target: 'http://localhost:3002',
         secure: false,
         ws: true,
       },
       '/uploads': {
-        target: 'http://localhost:8080',
+        target: 'http://localhost:3002',
         secure: false,
       },
     },
