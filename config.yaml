@@ -2,9 +2,12 @@
 host: "0.0.0.0"
 port: "3002"
 database_path: "relay.db"
-jwt_secret: "change-me-in-production-use-a-random-string"
+jwt_secret: "" # REQUIRED: Set a strong random secret (e.g. openssl rand -hex 32)
 upload_dir: "uploads"
 max_upload_mb: 50
 # tls_cert: "certs/cert.pem"
 # tls_key: "certs/key.pem"
 static_dir: "client/dist"
+# allowed_origins:
+#   - "https://your-domain.com"
+#   - "https://app.your-domain.com"

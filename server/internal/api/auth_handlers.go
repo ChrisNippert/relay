@@ -116,3 +116,24 @@ func LoginHandler(database *db.DB, cfg *config.Config) http.HandlerFunc {
 		json.NewEncoder(w).Encode(authResponse{Token: token, User: user})
 	}
 }
+
+func LogoutHandler(database *db.DB, cfg *config.Config) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := GetRawToken(r)
+		if token == "" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		claims, err := auth.ValidateToken(token, cfg.JWTSecret)
+		if err != nil {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		hash := hashToken(token)
+		database.RevokeToken(hash, claims.ExpiresAt.Time)
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}

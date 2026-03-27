@@ -169,4 +169,10 @@ CREATE TABLE IF NOT EXISTS server_invites (
 
 CREATE INDEX IF NOT EXISTS idx_server_invites_code ON server_invites(code);
 CREATE INDEX IF NOT EXISTS idx_server_invites_server ON server_invites(server_id);
+
+CREATE TABLE IF NOT EXISTS revoked_tokens (
+    token_hash TEXT PRIMARY KEY,
+    expires_at DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires ON revoked_tokens(expires_at);
 `

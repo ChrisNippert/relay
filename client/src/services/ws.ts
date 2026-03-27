@@ -22,12 +22,13 @@ export function connect() {
   if (serverUrl) {
     const parsed = new URL(serverUrl)
     const proto = parsed.protocol === 'https:' ? 'wss' : 'ws'
-    wsUrl = `${proto}://${parsed.host}/api/ws?token=${encodeURIComponent(token)}`
+    wsUrl = `${proto}://${parsed.host}/api/ws`
   } else {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    wsUrl = `${proto}://${location.host}/api/ws?token=${encodeURIComponent(token)}`
+    wsUrl = `${proto}://${location.host}/api/ws`
   }
-  ws = new WebSocket(wsUrl)
+  // Send JWT via Sec-WebSocket-Protocol header to avoid leaking it in the URL
+  ws = new WebSocket(wsUrl, ['auth', token])
 
   ws.onopen = () => {
     console.log('WebSocket connected')

@@ -66,6 +66,9 @@ export const register = (username: string, email: string, password: string, disp
 export const login = (email: string, password: string) =>
   request<AuthResponse>('POST', '/auth/login', { email, password })
 
+export const logout = () =>
+  request<void>('POST', '/auth/logout')
+
 // Users
 export const getMe = () => request<User>('GET', '/users/me')
 export const updateMe = (data: Partial<Pick<User, 'display_name' | 'avatar_url' | 'custom_status' | 'name_color'>>) =>
@@ -199,7 +202,10 @@ export function uploadFile(
   })
 }
 
-export const fileURL = (fileId: string) => `${getBase()}/files/${encodeURIComponent(fileId)}`
+export const fileURL = (fileId: string) => {
+  const base = `${getBase()}/files/${encodeURIComponent(fileId)}`
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base
+}
 
 // Voice state
 export const getVoiceUsers = (channelId: string) =>

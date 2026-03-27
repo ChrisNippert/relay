@@ -79,7 +79,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await ensureKeyPair().catch(console.error)
   }
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await api.logout()
+    } catch {
+      // Ignore errors — clear local state regardless
+    }
     api.setToken(null)
     disconnect()
     setUser(null)

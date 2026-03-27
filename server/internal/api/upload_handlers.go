@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/relay-chat/relay/internal/auth"
 	"github.com/relay-chat/relay/internal/config"
 	"github.com/relay-chat/relay/internal/db"
 )
@@ -129,5 +130,43 @@ func DownloadHandler(cfg *config.Config) http.HandlerFunc {
 		}
 
 		http.ServeFile(w, r, absFile)
+	}
+}
+
+// AuthenticatedDownloadHandler wraps DownloadHandler with authentication that
+// supports both Authorization header and ?token= query param (for img/a tags).
+func AuthenticatedDownloadHandler(cfg *config.Config, database *db.DB) http.HandlerFunc {
+	inner := DownloadHandler(cfg)
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Try Authorization header first
+		token := ""
+		if header := r.Header.Get("Authorization"); header != "" {
+			parts := strings.SplitN(header, " ", 2)
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				token = parts[1]
+			}
+		}
+		// Fall back to query param
+		if token == "" {
+			token = r.URL.Query().Get("token")
+		}
+		if token == "" {
+			http.Error(w, `{"error":"authentication required"}`, http.StatusUnauthorized)
+			return
+		}
+
+		_, err := auth.ValidateToken(token, cfg.JWTSecret)
+		if err != nil {
+			http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+			return
+		}
+
+		hash := hashToken(token)
+		if revoked, err := database.IsTokenRevoked(hash); err != nil || revoked {
+			http.Error(w, `{"error":"token has been revoked"}`, http.StatusUnauthorized)
+			return
+		}
+
+		inner(w, r)
 	}
 }

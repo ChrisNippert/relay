@@ -1,6 +1,8 @@
 package ws
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/relay-chat/relay/internal/auth"
 	"github.com/relay-chat/relay/internal/config"
+	"github.com/relay-chat/relay/internal/db"
 )
 
 var upgrader = websocket.Upgrader{
@@ -26,10 +29,20 @@ type WSMessage struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-// HandleWebSocket upgrades HTTP to WebSocket, authenticating via token query param.
-func HandleWebSocket(hub *Hub, cfg *config.Config) http.HandlerFunc {
+// HandleWebSocket upgrades HTTP to WebSocket, authenticating via Sec-WebSocket-Protocol header.
+func HandleWebSocket(hub *Hub, cfg *config.Config, database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := r.URL.Query().Get("token")
+		// The client sends the JWT as a subprotocol: ["auth", "<token>"]
+		// We extract the token from the protocol list and echo back "auth" as the
+		// selected subprotocol so the handshake completes.
+		protocols := websocket.Subprotocols(r)
+		var token string
+		for _, p := range protocols {
+			if p != "auth" {
+				token = p
+				break
+			}
+		}
 		if token == "" {
 			http.Error(w, "missing token", http.StatusUnauthorized)
 			return
@@ -41,7 +54,19 @@ func HandleWebSocket(hub *Hub, cfg *config.Config) http.HandlerFunc {
 			return
 		}
 
-		conn, err := upgrader.Upgrade(w, r, nil)
+		// Check if token has been revoked
+		h := sha256.Sum256([]byte(token))
+		tokenHash := hex.EncodeToString(h[:])
+		if revoked, err := database.IsTokenRevoked(tokenHash); err != nil || revoked {
+			http.Error(w, "token has been revoked", http.StatusUnauthorized)
+			return
+		}
+
+		// Set the selected subprotocol so the handshake succeeds
+		respHeader := http.Header{}
+		respHeader.Set("Sec-WebSocket-Protocol", "auth")
+
+		conn, err := upgrader.Upgrade(w, r, respHeader)
 		if err != nil {
 			log.Printf("WebSocket upgrade error: %v", err)
 			return

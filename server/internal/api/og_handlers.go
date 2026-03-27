@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -32,6 +34,7 @@ type ogCacheEntry struct {
 
 const ogCacheTTL = 30 * time.Minute
 const ogMaxBodyBytes = 256 * 1024 // only read first 256 KB of HTML
+const ogMaxCacheSize = 1000       // maximum cache entries to prevent memory exhaustion
 
 var metaTagRe = regexp.MustCompile(`<meta\s[^>]*>`)
 var attrRe = regexp.MustCompile(`(property|name|content)\s*=\s*"([^"]*)"`)
@@ -41,10 +44,40 @@ var ytLongRe = regexp.MustCompile(`(?:youtube\.com/watch\?.*v=)([\w-]{11})`)
 var ytShortRe = regexp.MustCompile(`(?:youtu\.be/)([\w-]{11})`)
 
 func OGHandler() http.HandlerFunc {
+	// Custom dialer that validates resolved IPs to prevent SSRF via DNS rebinding
+	safeDialer := &net.Dialer{Timeout: 5 * time.Second}
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+			// Resolve the hostname
+			ips, err := net.LookupIP(host)
+			if err != nil {
+				return nil, err
+			}
+			// Check ALL resolved IPs — block if any is private/internal
+			for _, ip := range ips {
+				if isPrivateIP(ip) {
+					return nil, &net.OpError{Op: "dial", Err: &net.AddrError{Err: "private IP blocked", Addr: ip.String()}}
+				}
+			}
+			// Connect to the first non-private IP
+			return safeDialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+		},
+	}
+
 	client := &http.Client{
-		Timeout: 8 * time.Second,
+		Timeout:   8 * time.Second,
+		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 {
+			if len(via) >= 3 {
+				return http.ErrUseLastResponse
+			}
+			// Re-validate the redirect target hostname
+			host := req.URL.Hostname()
+			if isBlockedHostname(host) {
 				return http.ErrUseLastResponse
 			}
 			return nil
@@ -65,35 +98,11 @@ func OGHandler() http.HandlerFunc {
 			return
 		}
 
-		// Block private/internal IPs to prevent SSRF
-		host := strings.ToLower(parsed.Hostname())
-		if host == "localhost" || host == "127.0.0.1" || host == "::1" ||
-			host == "0.0.0.0" || host == "" ||
-			strings.HasPrefix(host, "10.") || strings.HasPrefix(host, "192.168.") ||
-			strings.HasPrefix(host, "0.") || host == "metadata.google.internal" ||
-			strings.HasPrefix(host, "169.254.") ||
-			strings.HasPrefix(host, "fc00:") || strings.HasPrefix(host, "fd") ||
-			strings.HasPrefix(host, "fe80:") ||
-			strings.HasPrefix(host, "[::ffff:") ||
-			strings.Contains(host, "[:") {
+		// Block obviously private/internal hostnames before DNS resolution
+		host := parsed.Hostname()
+		if isBlockedHostname(host) {
 			http.Error(w, `{"error":"url not allowed"}`, http.StatusBadRequest)
 			return
-		}
-		// Block 172.16.0.0/12
-		if strings.HasPrefix(host, "172.") {
-			parts := strings.SplitN(host, ".", 4)
-			if len(parts) >= 2 {
-				var second int
-				for _, c := range parts[1] {
-					if c >= '0' && c <= '9' {
-						second = second*10 + int(c-'0')
-					}
-				}
-				if second >= 16 && second <= 31 {
-					http.Error(w, `{"error":"url not allowed"}`, http.StatusBadRequest)
-					return
-				}
-			}
 		}
 
 		// Check cache
@@ -222,11 +231,20 @@ func cacheOG(rawURL string, data *ogData) {
 	ogCacheMu.Lock()
 	ogCache[rawURL] = &ogCacheEntry{data: data, fetchedAt: time.Now()}
 	// Evict old entries if cache grows too large
-	if len(ogCache) > 500 {
+	if len(ogCache) > ogMaxCacheSize {
 		now := time.Now()
 		for k, v := range ogCache {
 			if now.Sub(v.fetchedAt) > ogCacheTTL {
 				delete(ogCache, k)
+			}
+		}
+		// If still over limit after TTL eviction, drop oldest entries
+		if len(ogCache) > ogMaxCacheSize {
+			for k := range ogCache {
+				delete(ogCache, k)
+				if len(ogCache) <= ogMaxCacheSize/2 {
+					break
+				}
 			}
 		}
 	}
@@ -236,4 +254,45 @@ func cacheOG(rawURL string, data *ogData) {
 func writeOGResult(w http.ResponseWriter, data *ogData) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
+}
+
+// isPrivateIP checks if an IP address is in a private, loopback, link-local, or otherwise internal range.
+func isPrivateIP(ip net.IP) bool {
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified() || ip.IsMulticast() {
+		return true
+	}
+	// Block IPv4-mapped IPv6 addresses that wrap private IPs (e.g. ::ffff:127.0.0.1)
+	if ip4 := ip.To4(); ip4 != nil {
+		return ip4.IsLoopback() || ip4.IsPrivate() || ip4.IsLinkLocalUnicast() || ip4.IsUnspecified()
+	}
+	// Block 100.64.0.0/10 (Carrier-Grade NAT / CGNAT)
+	if ip4 := ip.To4(); ip4 != nil && ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
+		return true
+	}
+	// Block 169.254.169.254 (cloud metadata)
+	if ip.Equal(net.ParseIP("169.254.169.254")) {
+		return true
+	}
+	return false
+}
+
+// isBlockedHostname does a fast pre-DNS check on the raw hostname string.
+func isBlockedHostname(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if h == "" || h == "localhost" || h == "metadata.google.internal" {
+		return true
+	}
+	// Raw IP literals
+	if ip := net.ParseIP(h); ip != nil {
+		return isPrivateIP(ip)
+	}
+	// Bracketed IPv6
+	if strings.HasPrefix(h, "[") {
+		trimmed := strings.Trim(h, "[]")
+		if ip := net.ParseIP(trimmed); ip != nil {
+			return isPrivateIP(ip)
+		}
+	}
+	return false
 }

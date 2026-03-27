@@ -19,7 +19,7 @@ type createInviteRequest struct {
 }
 
 func generateInviteCode() string {
-	b := make([]byte, 4)
+	b := make([]byte, 16)
 	rand.Read(b)
 	return hex.EncodeToString(b)
 }

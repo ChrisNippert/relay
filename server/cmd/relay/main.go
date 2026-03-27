@@ -4,6 +4,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/relay-chat/relay/internal/api"
 	"github.com/relay-chat/relay/internal/config"
@@ -25,6 +26,16 @@ func main() {
 		log.Fatalf("Failed to open database: %v", err)
 	}
 	defer database.Close()
+
+	// Periodically clean up expired revoked tokens
+	go func() {
+		for {
+			time.Sleep(1 * time.Hour)
+			if err := database.CleanExpiredTokens(); err != nil {
+				log.Printf("Failed to clean expired tokens: %v", err)
+			}
+		}
+	}()
 
 	hub := ws.NewHub(database)
 	go hub.Run()

@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -20,33 +21,45 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RealIP)
+
+	// CORS: use configured origins or default to allow all
+	allowedOrigins := cfg.AllowedOrigins
+	if len(allowedOrigins) == 0 {
+		allowedOrigins = []string{"*"}
+	}
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type"},
-		AllowCredentials: false,
+		AllowCredentials: len(allowedOrigins) > 0 && allowedOrigins[0] != "*",
 		MaxAge:           300,
 	}))
+
+	// Global rate limit: 120 requests/minute per IP
+	r.Use(RateLimitMiddleware(120, time.Minute))
 
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	// Public routes
-	r.Post("/api/auth/register", RegisterHandler(database, cfg))
-	r.Post("/api/auth/login", LoginHandler(database, cfg))
+	// Public routes with stricter rate limits
+	r.Post("/api/auth/register", RateLimitHandler(5, time.Minute, RegisterHandler(database, cfg)))
+	r.Post("/api/auth/login", RateLimitHandler(10, time.Minute, LoginHandler(database, cfg)))
 
 	// WebSocket (authenticated via query param token)
-	r.Get("/ws", ws.HandleWebSocket(hub, cfg))
-	r.Get("/api/ws", ws.HandleWebSocket(hub, cfg))
+	r.Get("/ws", ws.HandleWebSocket(hub, cfg, database))
+	r.Get("/api/ws", ws.HandleWebSocket(hub, cfg, database))
+
+	// File downloads — supports both Authorization header and ?token= query param
+	r.Get("/api/files/{fileID}", AuthenticatedDownloadHandler(cfg, database))
 
 	// Authenticated routes
 	r.Group(func(r chi.Router) {
-		r.Use(AuthMiddleware(cfg))
+		r.Use(AuthMiddleware(cfg, database))
 
-		// File downloads (require authentication)
-		r.Get("/api/files/{fileID}", DownloadHandler(cfg))
+		// Logout (token revocation)
+		r.Post("/api/auth/logout", LogoutHandler(database, cfg))
 
 		// Users
 		r.Get("/api/users/me", GetMeHandler(database))
