@@ -1,6 +1,6 @@
 # Binary
 bin/
-relay
+server/relay
 
 # Database
 *.db
