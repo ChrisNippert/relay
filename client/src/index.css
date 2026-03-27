@@ -2128,6 +2128,23 @@ html, body, #root {
   color: var(--text-muted);
 }
 
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.settings-toggle input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .settings-note {
   font-size: 0.8rem;
   color: var(--text-muted);

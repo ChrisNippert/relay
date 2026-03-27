@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { WSMessage as WSMsg } from '../types'
 import { useAuth } from '../context/AuthContext'
-import { subscribe, sendCallOffer, sendCallAnswer, sendIceCandidate, sendCallEnd } from '../services/ws'
+import { subscribe, sendCallOffer, sendCallAnswer, sendIceCandidate, sendCallEnd, sendCallRenegotiate } from '../services/ws'
 import { PeerConnection } from '../services/webrtc'
 import { playCallRing, playConnectedSound, playDisconnectedSound, playErrorSound } from '../services/sounds'
 import { getSettings } from '../services/settings'
@@ -72,6 +72,7 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
           handleAnswer(payload.signal as RTCSessionDescriptionInit)
           break
         case 'call_offer':
+        case 'call_renegotiate':
           handleRemoteOffer(payload.signal as RTCSessionDescriptionInit)
           break
         case 'ice_candidate':
@@ -88,9 +89,14 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
   async function startCall(remoteOffer?: RTCSessionDescriptionInit) {
     try {
       const settings = getSettings()
-      const audioConstraint: MediaTrackConstraints | boolean = settings.audioInputDevice
-        ? { deviceId: { exact: settings.audioInputDevice } }
-        : true
+      const audioConstraint: MediaTrackConstraints = {
+        noiseSuppression: settings.noiseSuppression,
+        echoCancellation: settings.echoCancellation,
+        autoGainControl: settings.autoGainControl,
+      }
+      if (settings.audioInputDevice) {
+        audioConstraint.deviceId = { exact: settings.audioInputDevice }
+      }
       const videoConstraint: MediaTrackConstraints | boolean = (!remoteOffer && startWithVideo)
         ? (settings.videoDevice ? { deviceId: { exact: settings.videoDevice } } : true)
         : false
@@ -127,6 +133,18 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
           if (remoteStream.getVideoTracks().length > 0 && remoteVideoRef.current) {
             remoteVideoRef.current.srcObject = remoteStream
             remoteVideoRef.current.volume = settings.outputVolume / 100
+
+            // Clear video element when remote camera is turned off to avoid freeze frame
+            remoteStream.getVideoTracks().forEach(t => {
+              t.addEventListener('ended', () => {
+                if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null
+              })
+            })
+            remoteStream.addEventListener('removetrack', (ev) => {
+              if (ev.track.kind === 'video' && remoteVideoRef.current) {
+                remoteVideoRef.current.srcObject = null
+              }
+            })
           }
           if (remoteAudioRef.current) {
             remoteAudioRef.current.srcObject = remoteStream
@@ -247,7 +265,7 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
           }
           // Renegotiate
           const offer = await pcRef.current.createOffer()
-          sendCallOffer(targetUserId, channelId, offer)
+          sendCallRenegotiate(targetUserId, channelId, offer)
         }
         setVideoOn(true)
       } catch (err) {
@@ -272,7 +290,7 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
       // Renegotiate
       if (pcRef.current) {
         const offer = await pcRef.current.createOffer()
-        sendCallOffer(targetUserId, channelId, offer)
+        sendCallRenegotiate(targetUserId, channelId, offer)
       }
     } else {
       try {
@@ -291,7 +309,7 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
             // Renegotiate
             if (pcRef.current) {
               pcRef.current.createOffer().then(offer => {
-                sendCallOffer(targetUserId, channelId, offer)
+                sendCallRenegotiate(targetUserId, channelId, offer)
               })
             }
           }
@@ -300,7 +318,7 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
         // Renegotiate
         if (pcRef.current) {
           const offer = await pcRef.current.createOffer()
-          sendCallOffer(targetUserId, channelId, offer)
+          sendCallRenegotiate(targetUserId, channelId, offer)
         }
       } catch {
         // User cancelled screen share picker

@@ -248,6 +248,32 @@ export default function SettingsPanel({ onClose }: Props) {
                 <span className="slider-value">{settings.outputVolume}%</span>
               </label>
 
+              <h3 className="settings-section">Voice Processing</h3>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={settings.noiseSuppression}
+                  onChange={(e) => update({ noiseSuppression: e.target.checked })}
+                />
+                <span>Noise Suppression</span>
+              </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={settings.echoCancellation}
+                  onChange={(e) => update({ echoCancellation: e.target.checked })}
+                />
+                <span>Echo Cancellation</span>
+              </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={settings.autoGainControl}
+                  onChange={(e) => update({ autoGainControl: e.target.checked })}
+                />
+                <span>Auto Gain Control</span>
+              </label>
+
               <h3 className="settings-section">Camera</h3>
               <select
                 value={settings.videoDevice}

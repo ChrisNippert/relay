@@ -103,7 +103,7 @@ func handleMessage(c *Client, raw []byte) {
 		handleTyping(c, msg.Payload, true)
 	case "typing_stop":
 		handleTyping(c, msg.Payload, false)
-	case "call_offer", "call_answer", "ice_candidate", "call_end":
+	case "call_offer", "call_answer", "ice_candidate", "call_end", "call_renegotiate":
 		handleCallSignal(c, msg.Type, msg.Payload)
 	case "voice_join":
 		handleVoiceJoin(c, msg.Payload)

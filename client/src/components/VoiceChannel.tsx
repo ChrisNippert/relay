@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useImperativeHandle, forwardRef } from 'react'
 import type { Channel, WSMessage as WSMsg } from '../types'
 import { useAuth } from '../context/AuthContext'
-import { subscribe, sendCallOffer, sendCallAnswer, sendIceCandidate, sendCallEnd, sendVoiceJoin, sendVoiceLeave, sendVoiceKick } from '../services/ws'
+import { subscribe, sendCallOffer, sendCallAnswer, sendIceCandidate, sendCallEnd, sendCallRenegotiate, sendVoiceJoin, sendVoiceLeave, sendVoiceKick } from '../services/ws'
 import { PeerConnection } from '../services/webrtc'
 import * as api from '../services/api'
 import { playJoinSound, playLeaveSound, playConnectedSound, playDisconnectedSound, playCallRing, playErrorSound } from '../services/sounds'
@@ -66,6 +66,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
   const analyserRef = useRef<AnalyserNode | null>(null)
   const speakingAnimRef = useRef<number>(0)
   const kickedRef = useRef(false)
+  const remoteVadRef = useRef<Map<string, { ctx: AudioContext; animId: number }>>(new Map())
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; userId: string; displayName: string } | null>(null)
 
   // Load server members for display names, or DM participants
@@ -136,6 +137,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
 
       switch (msg.type) {
         case 'call_offer':
+        case 'call_renegotiate':
           handleIncomingOffer(payload.from_user_id!, payload.signal as RTCSessionDescriptionInit)
           break
         case 'call_answer':
@@ -230,11 +232,61 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     setLocalSpeaking(false)
   }
 
+  function startRemoteVAD(userId: string, stream: MediaStream) {
+    // Don't double-track the same user
+    if (remoteVadRef.current.has(userId)) return
+    try {
+      const ctx = new AudioContext()
+      const source = ctx.createMediaStreamSource(stream)
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 512
+      analyser.smoothingTimeConstant = 0.4
+      source.connect(analyser)
+      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+
+      const check = () => {
+        analyser.getByteFrequencyData(dataArray)
+        let sum = 0
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i]!
+        const avg = sum / dataArray.length
+        const isSpeaking = avg > 15
+        setVoiceUsers((prev) =>
+          prev.map((u) => u.id === userId ? { ...u, speaking: isSpeaking } : u)
+        )
+        const entry = remoteVadRef.current.get(userId)
+        if (entry) entry.animId = requestAnimationFrame(check)
+      }
+      const animId = requestAnimationFrame(check)
+      remoteVadRef.current.set(userId, { ctx, animId })
+    } catch { /* AudioContext not supported */ }
+  }
+
+  function stopRemoteVAD(userId: string) {
+    const entry = remoteVadRef.current.get(userId)
+    if (entry) {
+      cancelAnimationFrame(entry.animId)
+      entry.ctx.close()
+      remoteVadRef.current.delete(userId)
+    }
+  }
+
+  function stopAllRemoteVAD() {
+    for (const [userId] of remoteVadRef.current) {
+      stopRemoteVAD(userId)
+    }
+  }
+
   function getAudioConstraints(): MediaTrackConstraints | boolean {
     const settings = getSettings()
-    return settings.audioInputDevice
-      ? { deviceId: { exact: settings.audioInputDevice } }
-      : true
+    const constraints: MediaTrackConstraints = {
+      noiseSuppression: settings.noiseSuppression,
+      echoCancellation: settings.echoCancellation,
+      autoGainControl: settings.autoGainControl,
+    }
+    if (settings.audioInputDevice) {
+      constraints.deviceId = { exact: settings.audioInputDevice }
+    }
+    return constraints
   }
 
   async function joinVoice() {
@@ -357,6 +409,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       pc.close()
       peersRef.current.delete(userId)
     }
+    stopRemoteVAD(userId)
     const el = document.getElementById(`remote-audio-${userId}`)
     el?.remove()
     primaryStreamIds.current.delete(userId)
@@ -393,6 +446,25 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         setVoiceUsers((prev) =>
           prev.map((u) => u.id === userId ? { ...u, hasVideo: true } : u)
         )
+
+        // Detect when remote video tracks end (camera turned off) to remove freeze frame
+        stream.getVideoTracks().forEach(t => {
+          t.addEventListener('ended', () => {
+            setRemoteStreams((prev) => {
+              const next = new Map(prev)
+              next.delete(userId)
+              return next
+            })
+            setVoiceUsers((prev) =>
+              prev.map((u) => u.id === userId ? { ...u, hasVideo: false } : u)
+            )
+          })
+        })
+      }
+
+      // Start remote voice activity detection
+      if (stream.getAudioTracks().length > 0) {
+        startRemoteVAD(userId, stream)
       }
 
       // Set up audio element
@@ -449,6 +521,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     peersRef.current.clear()
 
     stopVoiceActivityDetection()
+    stopAllRemoteVAD()
 
     localStreamRef.current?.getTracks().forEach((t) => t.stop())
     localStreamRef.current = null
@@ -605,7 +678,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     for (const [userId, pc] of peersRef.current) {
       try {
         const offer = await pc.createOffer()
-        sendCallOffer(userId, channel.id, offer)
+        sendCallRenegotiate(userId, channel.id, offer)
       } catch (err) {
         console.error(`Renegotiation failed for ${userId}:`, err)
       }

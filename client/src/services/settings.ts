@@ -6,6 +6,9 @@ export interface MediaSettings {
   videoDevice: string        // deviceId
   inputVolume: number        // 0-100
   outputVolume: number       // 0-100
+  noiseSuppression: boolean  // browser-level noise suppression
+  echoCancellation: boolean  // browser-level echo cancellation
+  autoGainControl: boolean   // browser-level auto gain control
 }
 
 const STORAGE_KEY = 'relay_media_settings'
@@ -16,6 +19,9 @@ const defaults: MediaSettings = {
   videoDevice: '',
   inputVolume: 100,
   outputVolume: 100,
+  noiseSuppression: true,
+  echoCancellation: true,
+  autoGainControl: true,
 }
 
 export function getSettings(): MediaSettings {

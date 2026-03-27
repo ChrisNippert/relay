@@ -120,6 +120,10 @@ export function sendCallEnd(targetUserId: string, channelId: string) {
   send('call_end', { target_user_id: targetUserId, channel_id: channelId })
 }
 
+export function sendCallRenegotiate(targetUserId: string, channelId: string, signal: RTCSessionDescriptionInit) {
+  send('call_renegotiate', { target_user_id: targetUserId, channel_id: channelId, signal })
+}
+
 export function sendVoiceJoin(channelId: string) {
   send('voice_join', { channel_id: channelId })
 }
