@@ -7,6 +7,7 @@ import ChannelSettings from './ChannelSettings'
 export interface VoicePresenceUser {
   id: string
   displayName: string
+  speaking?: boolean
 }
 
 interface Props {
@@ -179,7 +180,7 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
                   <div className="voice-channel-users">
                     {users.map((u) => (
                       <div key={u.id} className="voice-channel-user">
-                        <span className="voice-channel-user-dot" />
+                        <span className={`voice-channel-user-dot ${u.speaking ? 'speaking' : ''}`} />
                         <span className="voice-channel-user-name">{u.displayName}</span>
                       </div>
                     ))}

@@ -70,9 +70,9 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 
 		// Friends
 		r.Get("/api/friends", GetFriendsHandler(database))
-		r.Post("/api/friends/request", SendFriendRequestHandler(database))
-		r.Post("/api/friends/accept/{friendshipID}", AcceptFriendRequestHandler(database))
-		r.Delete("/api/friends/{friendshipID}", RemoveFriendHandler(database))
+		r.Post("/api/friends/request", SendFriendRequestHandler(database, hub))
+		r.Post("/api/friends/accept/{friendshipID}", AcceptFriendRequestHandler(database, hub))
+		r.Delete("/api/friends/{friendshipID}", RemoveFriendHandler(database, hub))
 
 		// Servers
 		r.Post("/api/servers", CreateServerHandler(database))

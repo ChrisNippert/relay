@@ -84,6 +84,12 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall }
           else next.delete(p.user_id)
           return next
         })
+      } else if (msg.type === 'friend_request' || msg.type === 'friend_accepted') {
+        // Reload friends list when we receive a new request or acceptance
+        loadFriends()
+      } else if (msg.type === 'friend_removed') {
+        const p = msg.payload as { friendship_id: string }
+        setFriends((prev) => prev.filter((f) => f.id !== p.friendship_id))
       }
     })
     return unsub

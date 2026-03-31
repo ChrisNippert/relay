@@ -135,3 +135,7 @@ export function sendVoiceLeave(channelId: string) {
 export function sendVoiceKick(channelId: string, userId: string) {
   send('voice_kick', { channel_id: channelId, user_id: userId })
 }
+
+export function sendVoiceSpeaking(channelId: string, speaking: boolean) {
+  send('voice_speaking', { channel_id: channelId, speaking })
+}

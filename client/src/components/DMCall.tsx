@@ -263,9 +263,11 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
       try {
         const settings = getSettings()
         const constraints: MediaStreamConstraints = {
+          audio: false,
           video: settings.videoDevice ? { deviceId: { exact: settings.videoDevice } } : true
         }
         const videoStream = await navigator.mediaDevices.getUserMedia(constraints)
+        videoStream.getAudioTracks().forEach((t) => t.stop())
         const videoTrack = videoStream.getVideoTracks()[0]
         if (videoTrack && localStreamRef.current && pcRef.current) {
           localStreamRef.current.addTrack(videoTrack)

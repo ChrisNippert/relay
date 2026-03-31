@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useImperativeHandle, forwardRef } from 'react'
 import type { Channel, WSMessage as WSMsg } from '../types'
 import { useAuth } from '../context/AuthContext'
-import { subscribe, sendCallOffer, sendCallAnswer, sendIceCandidate, sendCallEnd, sendCallRenegotiate, sendVoiceJoin, sendVoiceLeave, sendVoiceKick } from '../services/ws'
+import { subscribe, sendCallOffer, sendCallAnswer, sendIceCandidate, sendCallEnd, sendCallRenegotiate, sendVoiceJoin, sendVoiceLeave, sendVoiceKick, sendVoiceSpeaking } from '../services/ws'
 import { PeerConnection } from '../services/webrtc'
 import * as api from '../services/api'
 import { playJoinSound, playLeaveSound, playConnectedSound, playDisconnectedSound, playCallRing, playErrorSound } from '../services/sounds'
@@ -60,6 +60,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
   const localStreamRef = useRef<MediaStream | null>(null)
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const localScreenRef = useRef<HTMLVideoElement>(null)
+  const lastSpeakingRef = useRef(false)
   const screenStreamRef = useRef<MediaStream | null>(null)
   const remoteAudioRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -189,7 +190,19 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     }
   }, [autoJoin])
 
-  const getName = useCallback((userId: string) => membersRef.current.get(userId) ?? userId.slice(0, 8), [])
+  const getName = useCallback((userId: string) => {
+    const cached = membersRef.current.get(userId)
+    if (cached) return cached
+    // Kick off async fetch to resolve the name — will update voiceUsers when it resolves
+    api.getUser(userId).then((u) => {
+      membersRef.current.set(userId, u.display_name)
+      setMembers(new Map(membersRef.current))
+      setVoiceUsers((prev) =>
+        prev.map((vu) => vu.id === userId ? { ...vu, displayName: u.display_name } : vu)
+      )
+    }).catch(() => {})
+    return userId.slice(0, 8)
+  }, [])
 
   // Fullscreen change listener
   useEffect(() => {
@@ -229,6 +242,11 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         setVoiceUsers((prev) =>
           prev.map((u) => u.isSelf ? { ...u, speaking: isSpeaking } : u)
         )
+        // Broadcast speaking state changes to other users
+        if (isSpeaking !== lastSpeakingRef.current) {
+          lastSpeakingRef.current = isSpeaking
+          sendVoiceSpeaking(channel.id, isSpeaking)
+        }
         speakingAnimRef.current = requestAnimationFrame(check)
       }
       check()
@@ -472,20 +490,48 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
           prev.map((u) => u.id === userId ? { ...u, hasVideo: true } : u)
         )
 
-        // Detect when remote video tracks end (camera turned off) to remove freeze frame
-        liveVideoTracks.forEach(t => {
-          t.addEventListener('ended', () => {
-            setRemoteStreams((prev) => {
-              const next = new Map(prev)
-              next.delete(userId)
-              return next
-            })
-            setVoiceUsers((prev) =>
-              prev.map((u) => u.id === userId ? { ...u, hasVideo: false } : u)
-            )
+        const clearVideo = () => {
+          setRemoteStreams((prev) => {
+            const next = new Map(prev)
+            next.delete(userId)
+            return next
           })
+          setVoiceUsers((prev) =>
+            prev.map((u) => u.id === userId ? { ...u, hasVideo: false } : u)
+          )
+        }
+
+        // Detect when remote video tracks end or are muted (camera turned off)
+        liveVideoTracks.forEach(t => {
+          t.addEventListener('ended', clearVideo)
+          t.addEventListener('mute', clearVideo)
         })
+      } else {
+        // No live video tracks — clear any existing video (e.g. after renegotiation when camera was turned off)
+        setRemoteStreams((prev) => {
+          const next = new Map(prev)
+          next.delete(userId)
+          return next
+        })
+        setVoiceUsers((prev) =>
+          prev.map((u) => u.id === userId ? { ...u, hasVideo: false } : u)
+        )
       }
+
+      // Listen for track removal on the primary stream (handles sender removing tracks via renegotiation)
+      stream.addEventListener('removetrack', () => {
+        const remainingVideoTracks = stream.getVideoTracks().filter(t => t.readyState === 'live')
+        if (remainingVideoTracks.length === 0) {
+          setRemoteStreams((prev) => {
+            const next = new Map(prev)
+            next.delete(userId)
+            return next
+          })
+          setVoiceUsers((prev) =>
+            prev.map((u) => u.id === userId ? { ...u, hasVideo: false } : u)
+          )
+        }
+      })
 
       // Start remote voice activity detection
       if (stream.getAudioTracks().length > 0) {
@@ -623,9 +669,12 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       try {
         const settings = getSettings()
         const constraints: MediaStreamConstraints = {
+          audio: false,
           video: settings.videoDevice ? { deviceId: { exact: settings.videoDevice } } : true
         }
         const videoStream = await navigator.mediaDevices.getUserMedia(constraints)
+        // Stop any audio tracks that may have been captured
+        videoStream.getAudioTracks().forEach((t) => t.stop())
         const videoTrack = videoStream.getVideoTracks()[0]
         if (videoTrack && localStreamRef.current) {
           localStreamRef.current.addTrack(videoTrack)

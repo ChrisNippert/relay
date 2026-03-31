@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/relay-chat/relay/internal/db"
+	"github.com/relay-chat/relay/internal/ws"
 )
 
 func GetFriendsHandler(database *db.DB) http.HandlerFunc {
@@ -30,7 +31,7 @@ type friendRequest struct {
 	UserID string `json:"user_id"`
 }
 
-func SendFriendRequestHandler(database *db.DB) http.HandlerFunc {
+func SendFriendRequestHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req friendRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -58,6 +59,13 @@ func SendFriendRequestHandler(database *db.DB) http.HandlerFunc {
 					return
 				}
 				existing.Status = "accepted"
+				// Notify both users
+				notify, _ := json.Marshal(map[string]interface{}{
+					"type":    "friend_accepted",
+					"payload": existing,
+				})
+				hub.SendToUser(req.UserID, notify)
+				hub.SendToUser(userID, notify)
 				w.Header().Set("Content-Type", "application/json")
 				json.NewEncoder(w).Encode(existing)
 				return
@@ -74,13 +82,20 @@ func SendFriendRequestHandler(database *db.DB) http.HandlerFunc {
 			return
 		}
 
+		// Notify the target user via WebSocket
+		notify, _ := json.Marshal(map[string]interface{}{
+			"type":    "friend_request",
+			"payload": friendship,
+		})
+		hub.SendToUser(req.UserID, notify)
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(friendship)
 	}
 }
 
-func AcceptFriendRequestHandler(database *db.DB) http.HandlerFunc {
+func AcceptFriendRequestHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		friendshipID := chi.URLParam(r, "friendshipID")
 
@@ -101,11 +116,19 @@ func AcceptFriendRequestHandler(database *db.DB) http.HandlerFunc {
 			return
 		}
 
+		// Notify the original requester that their request was accepted
+		friendship.Status = "accepted"
+		notify, _ := json.Marshal(map[string]interface{}{
+			"type":    "friend_accepted",
+			"payload": friendship,
+		})
+		hub.SendToUser(friendship.UserID, notify)
+
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
-func RemoveFriendHandler(database *db.DB) http.HandlerFunc {
+func RemoveFriendHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		friendshipID := chi.URLParam(r, "friendshipID")
 
@@ -125,6 +148,17 @@ func RemoveFriendHandler(database *db.DB) http.HandlerFunc {
 			http.Error(w, `{"error":"failed to remove friend"}`, http.StatusInternalServerError)
 			return
 		}
+
+		// Notify the other user
+		otherID := friendship.FriendID
+		if otherID == userID {
+			otherID = friendship.UserID
+		}
+		notify, _ := json.Marshal(map[string]interface{}{
+			"type":    "friend_removed",
+			"payload": map[string]string{"friendship_id": friendshipID},
+		})
+		hub.SendToUser(otherID, notify)
 
 		w.WriteHeader(http.StatusNoContent)
 	}

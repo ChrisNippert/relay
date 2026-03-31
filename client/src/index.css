@@ -543,6 +543,12 @@ html, body, #root {
   border-radius: 50%;
   background: var(--success);
   flex-shrink: 0;
+  transition: box-shadow 0.15s, background 0.15s;
+}
+
+.voice-channel-user-dot.speaking {
+  background: #43b581;
+  box-shadow: 0 0 4px 2px rgba(67, 181, 129, 0.6);
 }
 
 .voice-channel-user-name {
@@ -862,8 +868,21 @@ html, body, #root {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  line-height: 1.4;
+  line-height: 1;
   text-align: center;
+}
+
+.user-popover-btn span:first-child {
+  font-size: 1rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+}
+
+.user-popover-btn span:last-child {
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
 }
 
 .user-popover-btn:hover {

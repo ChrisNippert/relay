@@ -111,6 +111,8 @@ func handleMessage(c *Client, raw []byte) {
 		handleVoiceLeave(c, msg.Payload)
 	case "voice_kick":
 		handleVoiceKick(c, msg.Payload)
+	case "voice_speaking":
+		handleVoiceSpeaking(c, msg.Payload)
 	case "key_request":
 		handleKeyRequest(c, msg.Payload)
 	default:
@@ -462,6 +464,27 @@ func handleVoiceKick(c *Client, payload json.RawMessage) {
 		})),
 	}
 	c.hub.SendToChannel(p.ChannelID, mustMarshal(stateMsg), "")
+}
+
+func handleVoiceSpeaking(c *Client, payload json.RawMessage) {
+	var p struct {
+		ChannelID string `json:"channel_id"`
+		Speaking  bool   `json:"speaking"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return
+	}
+
+	msg := WSMessage{
+		Type: "voice_speaking",
+		Payload: json.RawMessage(mustMarshal(map[string]interface{}{
+			"channel_id": p.ChannelID,
+			"user_id":    c.userID,
+			"speaking":   p.Speaking,
+		})),
+	}
+	data := mustMarshal(msg)
+	c.hub.SendToChannel(p.ChannelID, data, c.userID)
 }
 
 // HandleDisconnect cleans up voice state when a user disconnects.

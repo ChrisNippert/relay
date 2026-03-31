@@ -173,7 +173,7 @@ export default function Home() {
       setVoicePresence(new Map(entries))
     })
 
-    // Subscribe to voice_state updates
+    // Subscribe to voice_state and voice_speaking updates
     const unsub = subscribe((msg: WSMsg) => {
       if (msg.type === 'voice_state') {
         const payload = msg.payload as { channel_id: string; user_ids: string[] }
@@ -191,6 +191,17 @@ export default function Home() {
             next.set(payload.channel_id, users)
             return next
           })
+        })
+      } else if (msg.type === 'voice_speaking') {
+        const payload = msg.payload as { channel_id: string; user_id: string; speaking: boolean }
+        setVoicePresence((prev) => {
+          const users = prev.get(payload.channel_id)
+          if (!users) return prev
+          const next = new Map(prev)
+          next.set(payload.channel_id, users.map((u) =>
+            u.id === payload.user_id ? { ...u, speaking: payload.speaking } : u
+          ))
+          return next
         })
       }
     })
@@ -281,8 +292,12 @@ export default function Home() {
       // If already in a different voice channel, leave it first
       if (activeVoiceChannel && voiceRef.current) {
         voiceRef.current.leaveVoice()
+        // Small delay to let leave signals propagate before joining new channel
+        setActiveVoiceChannel(null)
+        setTimeout(() => setActiveVoiceChannel(channel), 300)
+      } else {
+        setActiveVoiceChannel(channel)
       }
-      setActiveVoiceChannel(channel)
     }
   }
 
