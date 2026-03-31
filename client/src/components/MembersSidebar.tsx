@@ -94,6 +94,13 @@ export default function MembersSidebar({ serverId, onMessage, isAdmin }: Members
         if (payload.server_id === serverId) {
           setMembers((prev) => prev.filter((m) => m.user.id !== payload.user_id))
         }
+      } else if (msg.type === 'member_role_updated') {
+        const payload = msg.payload as { server_id: string; user_id: string; role: string }
+        if (payload.server_id === serverId) {
+          setMembers((prev) => prev.map((m) =>
+            m.user.id === payload.user_id ? { ...m, member: { ...m.member, role: payload.role } } : m
+          ))
+        }
       }
     })
     return unsub

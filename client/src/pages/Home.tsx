@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import type { Server, Channel, Message, WSMessage as WSMsg } from '../types'
 import * as api from '../services/api'
 import { useAuth } from '../context/AuthContext'
-import { subscribe } from '../services/ws'
+import { subscribe, sendVoiceKick } from '../services/ws'
 import { playMessageSound, playCallRing } from '../services/sounds'
 import * as e2e from '../services/e2e'
 import { setICEConfig } from '../services/webrtc'
@@ -478,7 +478,9 @@ export default function Home() {
           <>
             <div className="sidebar-panels-container">
               <div className={`sidebar-panel ${view === 'dm' ? 'active' : ''}`}>
-                <FriendsList dmChannels={dmChannels} onSelectChannel={handleSelectChannel} onStartCall={handleStartDMCall} onUnfriend={handleUnfriend} />
+                <FriendsList dmChannels={dmChannels} onSelectChannel={handleSelectChannel} onStartCall={handleStartDMCall} onUnfriend={handleUnfriend} onArchiveDM={(chId) => {
+                  if (selectedChannel?.id === chId) setSelectedChannel(null)
+                }} />
               </div>
               <div className={`sidebar-panel ${view === 'server' ? 'active' : ''}`}>
                 <ChannelList
@@ -490,6 +492,9 @@ export default function Home() {
                   serverId={selectedServer?.id}
                   onChannelsChanged={refreshChannels}
                   unreadChannels={unreadChannels}
+                  onVoiceUserVolumeChange={(userId, vol) => voiceRef.current?.setUserVolume(userId, vol)}
+                  getVoiceUserVolume={(userId) => voiceRef.current?.getUserVolume(userId) ?? 100}
+                  onVoiceKick={(channelId, userId) => sendVoiceKick(channelId, userId)}
                 />
               </div>
             </div>
@@ -597,6 +602,8 @@ export default function Home() {
               channel={activeVoiceChannel}
               autoJoin
               isAdmin={isAdmin}
+              showMembers={showMembers}
+              onToggleMembers={view === 'server' ? () => setShowMembers((p) => !p) : undefined}
               onJoin={() => { setActiveVoiceChannel(activeVoiceChannel); syncVoiceControls() }}
               onLeave={handleVoiceLeave}
             />

@@ -139,6 +139,7 @@ export default function UserPopover({ userId, anchorRect, onClose, onMessage, se
         <div className="user-popover-loading">Loading...</div>
       ) : userInfo ? (
         <>
+          <div className="user-popover-banner" style={userInfo.name_color ? { background: `linear-gradient(135deg, ${userInfo.name_color}, var(--bg-tertiary))` } : undefined} />
           <div className="user-popover-header">
             <span className="user-popover-avatar">
               {userInfo.avatar_url ? (
@@ -171,40 +172,43 @@ export default function UserPopover({ userId, anchorRect, onClose, onMessage, se
           {!isSelf && (
             <div className="user-popover-actions">
               <button className="user-popover-btn message" onClick={handleMessage}>
-                <span>💬</span><span>Message</span>
+                💬 Message
               </button>
               {friendStatus === 'none' && (
                 <button className="user-popover-btn add" onClick={handleAddFriend}>
-                  <span>➕</span><span>Add Friend</span>
+                  ➕ Add Friend
                 </button>
               )}
               {friendStatus === 'pending-sent' && (
                 <button className="user-popover-btn pending" disabled>
-                  <span>⏳</span><span>Request Sent</span>
+                  ⏳ Request Sent
                 </button>
               )}
               {friendStatus === 'pending-received' && (
                 <button className="user-popover-btn accept" onClick={handleAcceptFriend}>
-                  <span>✅</span><span>Accept Request</span>
+                  ✅ Accept Request
                 </button>
               )}
               {friendStatus === 'accepted' && (
                 <button className="user-popover-btn friends" disabled>
-                  <span>✓</span><span>Friends</span>
+                  ✓ Friends
                 </button>
               )}
               {isAdmin && serverId && currentRole && (
-                <button
-                  className={`user-popover-btn ${currentRole === 'admin' ? 'admin-remove' : 'admin-add'}`}
-                  onClick={handleToggleAdmin}
-                >
-                  {currentRole === 'admin' ? '★ Remove Admin' : '☆ Make Admin'}
-                </button>
-              )}
-              {isAdmin && serverId && currentRole && currentRole !== 'owner' && (
-                <button className="user-popover-btn kick" onClick={handleKick}>
-                  Kick from Server
-                </button>
+                <>
+                  <div className="user-popover-actions-divider" />
+                  <button
+                    className={`user-popover-btn ${currentRole === 'admin' ? 'admin-remove' : 'admin-add'}`}
+                    onClick={handleToggleAdmin}
+                  >
+                    {currentRole === 'admin' ? '★ Remove Admin' : '☆ Make Admin'}
+                  </button>
+                  {currentRole !== 'owner' && (
+                    <button className="user-popover-btn kick" onClick={handleKick}>
+                      🚫 Kick from Server
+                    </button>
+                  )}
+                </>
               )}
             </div>
           )}

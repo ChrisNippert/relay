@@ -31,6 +31,7 @@ export class PeerConnection {
   localStream: MediaStream | null = null
   onIceCandidate: ((candidate: RTCIceCandidateInit) => void) | null = null
   onRemoteStream: ((stream: MediaStream) => void) | null = null
+  onDisconnected: (() => void) | null = null
 
   constructor() {
     this.pc = new RTCPeerConnection(getICEConfig())
@@ -42,9 +43,16 @@ export class PeerConnection {
     }
 
     this.pc.ontrack = (ev) => {
-      const stream = ev.streams[0]
-      if (stream) {
-        this.onRemoteStream?.(stream)
+      // ev.streams[0] may be undefined on Firefox when tracks aren't associated with a stream
+      const stream = ev.streams[0] ?? new MediaStream([ev.track])
+      this.onRemoteStream?.(stream)
+    }
+
+    // Monitor connection state and trigger recovery on failures
+    this.pc.oniceconnectionstatechange = () => {
+      const state = this.pc.iceConnectionState
+      if (state === 'disconnected' || state === 'failed') {
+        this.onDisconnected?.()
       }
     }
   }
@@ -69,8 +77,8 @@ export class PeerConnection {
     return this.localStream
   }
 
-  async createOffer(): Promise<RTCSessionDescriptionInit> {
-    const offer = await this.pc.createOffer()
+  async createOffer(iceRestart = false): Promise<RTCSessionDescriptionInit> {
+    const offer = await this.pc.createOffer({ iceRestart })
     await this.pc.setLocalDescription(offer)
     return offer
   }

@@ -13,6 +13,8 @@ interface Props {
   onJoin?: () => void
   onLeave?: () => void
   isAdmin?: boolean
+  showMembers?: boolean
+  onToggleMembers?: () => void
 }
 
 export interface VoiceChannelHandle {
@@ -21,6 +23,8 @@ export interface VoiceChannelHandle {
   toggleVideo: () => void
   toggleScreenShare: () => void
   leaveVoice: () => void
+  setUserVolume: (userId: string, volume: number) => void
+  getUserVolume: (userId: string) => number
   muted: boolean
   deafened: boolean
   videoOn: boolean
@@ -39,7 +43,7 @@ interface VoiceUser {
   deafened: boolean
 }
 
-export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ channel, autoJoin, onJoin, onLeave, isAdmin }, ref) {
+export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ channel, autoJoin, onJoin, onLeave, isAdmin, showMembers, onToggleMembers }, ref) {
   const { user } = useAuth()
   const [joined, setJoined] = useState(false)
   const [voiceUsers, setVoiceUsers] = useState<VoiceUser[]>([])
@@ -64,6 +68,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const localScreenRef = useRef<HTMLVideoElement>(null)
   const lastSpeakingRef = useRef(false)
+  const mutedRef = useRef(false)
   const screenStreamRef = useRef<MediaStream | null>(null)
   const remoteAudioRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -73,6 +78,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
   const speakingAnimRef = useRef<number>(0)
   const kickedRef = useRef(false)
   const remoteVadRef = useRef<Map<string, { ctx: AudioContext; animId: number }>>(new Map())
+  const remoteGainRef = useRef<Map<string, { ctx: AudioContext; gain: GainNode }>>(new Map())
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; userId: string; displayName: string; isSelf: boolean; tileId?: string } | null>(null)
   const [userVolumes, setUserVolumes] = useState<Record<string, number>>(() => getSettings().userVolumes || {})
 
@@ -186,6 +192,8 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     toggleVideo: () => toggleVideo(),
     toggleScreenShare: () => toggleScreenShare(),
     leaveVoice: () => leaveVoice(),
+    setUserVolume: (userId: string, volume: number) => handleUserVolumeChange(userId, volume),
+    getUserVolume: (userId: string) => userVolumes[userId] ?? 100,
     muted,
     deafened,
     videoOn,
@@ -240,6 +248,39 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     return () => window.removeEventListener('media-settings-changed', applySettings)
   }, [joined])
 
+  // Dynamically update screen share when settings change
+  useEffect(() => {
+    if (!joined) return
+    const applyScreenSettings = () => {
+      if (!screenStreamRef.current) return
+      const s = getSettings()
+      const videoTrack = screenStreamRef.current.getVideoTracks()[0]
+      if (videoTrack) {
+        // Apply resolution + framerate via track constraints
+        const constraints: MediaTrackConstraints = {}
+        if (s.screenShareResolution > 0) {
+          constraints.height = { ideal: s.screenShareResolution }
+          const widths: Record<number, number> = { 360: 640, 480: 854, 720: 1280, 1080: 1920, 1440: 2560 }
+          if (widths[s.screenShareResolution]) {
+            constraints.width = { ideal: widths[s.screenShareResolution] }
+          }
+        }
+        if (s.screenShareFramerate > 0) {
+          constraints.frameRate = { ideal: s.screenShareFramerate }
+        }
+        if (Object.keys(constraints).length > 0) {
+          videoTrack.applyConstraints(constraints).catch((err) => {
+            console.warn('[ScreenShare] Could not apply track constraints:', err)
+          })
+        }
+      }
+      // Apply maxBitrate to senders
+      applyScreenShareBitrate()
+    }
+    window.addEventListener('media-settings-changed', applyScreenSettings)
+    return () => window.removeEventListener('media-settings-changed', applyScreenSettings)
+  }, [joined])
+
   function toggleFullscreen() {
     if (document.fullscreenElement) {
       document.exitFullscreen()
@@ -254,38 +295,37 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       const ctx = new AudioContext()
       audioContextRef.current = ctx
       const source = ctx.createMediaStreamSource(stream)
+
       const analyser = ctx.createAnalyser()
       analyser.fftSize = 512
-      analyser.smoothingTimeConstant = 0.4
+      analyser.smoothingTimeConstant = 0.6
       source.connect(analyser)
       analyserRef.current = analyser
 
-      // Set up noise gate: source -> gain -> destination (replaces track)
-      const settings = getSettings()
-      if (settings.noiseGateEnabled) {
-        const gain = ctx.createGain()
-        gain.gain.value = 1
-        gainNodeRef.current = gain
-        source.connect(gain)
-        const dest = ctx.createMediaStreamDestination()
-        gain.connect(dest)
-        // Replace the audio track in the stream and all peer connections
-        const gatedTrack = dest.stream.getAudioTracks()[0]
-        if (gatedTrack) {
-          const originalTrack = stream.getAudioTracks()[0]
-          if (originalTrack) {
-            stream.removeTrack(originalTrack)
-            stream.addTrack(gatedTrack)
-            // Update senders in existing peer connections
-            for (const pc of peersRef.current.values()) {
-              const sender = pc.pc.getSenders().find(s => s.track === originalTrack)
-              if (sender) sender.replaceTrack(gatedTrack)
-            }
+      // Always set up noise gate chain (gain node) so it can be toggled dynamically
+      const gain = ctx.createGain()
+      gain.gain.value = 1
+      gainNodeRef.current = gain
+      source.connect(gain)
+      const dest = ctx.createMediaStreamDestination()
+      gain.connect(dest)
+      // Replace the audio track in the stream and all peer connections
+      const gatedTrack = dest.stream.getAudioTracks()[0]
+      if (gatedTrack) {
+        const originalTrack = stream.getAudioTracks()[0]
+        if (originalTrack) {
+          stream.removeTrack(originalTrack)
+          stream.addTrack(gatedTrack)
+          // Update senders in existing peer connections
+          for (const pc of peersRef.current.values()) {
+            const sender = pc.pc.getSenders().find(s => s.track === originalTrack)
+            if (sender) sender.replaceTrack(gatedTrack)
           }
         }
       }
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount)
+      let gateHoldUntil = 0 // Hold gate open for a bit after speech stops
       const check = () => {
         analyser.getByteFrequencyData(dataArray)
         let sum = 0
@@ -293,11 +333,22 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         const avg = sum / dataArray.length
         const curSettings = getSettings()
         const threshold = curSettings.noiseGateEnabled ? curSettings.noiseGateThreshold : 15
-        const isSpeaking = avg > threshold
+        const now = performance.now()
+        const aboveThreshold = !mutedRef.current && avg > threshold
 
-        // Apply noise gate
-        if (curSettings.noiseGateEnabled && gainNodeRef.current) {
-          gainNodeRef.current.gain.setTargetAtTime(isSpeaking ? 1 : 0, audioContextRef.current!.currentTime, 0.01)
+        // Hold gate open for 250ms after speech stops to avoid clipping word endings
+        if (aboveThreshold) gateHoldUntil = now + 250
+        const isSpeaking = aboveThreshold || now < gateHoldUntil
+
+        // Apply noise gate (also gate when muted)
+        if (gainNodeRef.current) {
+          const gateActive = curSettings.noiseGateEnabled || mutedRef.current
+          if (gateActive) {
+            // Use slower release (80ms) to avoid harsh cutoffs
+            gainNodeRef.current.gain.setTargetAtTime(isSpeaking ? 1 : 0, audioContextRef.current!.currentTime, isSpeaking ? 0.01 : 0.08)
+          } else {
+            gainNodeRef.current.gain.setTargetAtTime(1, audioContextRef.current!.currentTime, 0.01)
+          }
         }
 
         setLocalSpeaking(isSpeaking)
@@ -437,6 +488,13 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       })
     }
 
+    pc.onDisconnected = () => {
+      console.warn(`[WebRTC] ICE disconnected for ${targetUserId}, attempting restart`)
+      pc.createOffer(true).then((restartOffer) => {
+        sendCallRenegotiate(targetUserId, channel.id, restartOffer)
+      }).catch(() => {})
+    }
+
     const offer = await pc.createOffer()
     sendCallOffer(targetUserId, channel.id, offer)
   }
@@ -481,6 +539,13 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       })
     }
 
+    pc.onDisconnected = () => {
+      console.warn(`[WebRTC] ICE disconnected for ${fromUserId}, attempting restart`)
+      pc.createOffer(true).then((restartOffer) => {
+        sendCallRenegotiate(fromUserId, channel.id, restartOffer)
+      }).catch(() => {})
+    }
+
     const answer = await pc.handleOffer(offer)
     sendCallAnswer(fromUserId, channel.id, answer)
     playCallRing()
@@ -515,6 +580,11 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       peersRef.current.delete(userId)
     }
     stopRemoteVAD(userId)
+    // Clean up gain nodes
+    const g = remoteGainRef.current.get(userId)
+    if (g) { g.ctx.close().catch(() => {}); remoteGainRef.current.delete(userId) }
+    const sg = remoteGainRef.current.get(`screen-${userId}`)
+    if (sg) { sg.ctx.close().catch(() => {}); remoteGainRef.current.delete(`screen-${userId}`) }
     const el = document.getElementById(`remote-audio-${userId}`)
     el?.remove()
     const screenAudioEl = document.getElementById(`remote-screen-audio-${userId}`)
@@ -542,7 +612,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     playLeaveSound()
   }
 
-  function attachRemoteMedia(userId: string, stream: MediaStream) {
+  async function attachRemoteMedia(userId: string, stream: MediaStream) {
     // Track first stream per user as primary (camera/audio)
     if (!primaryStreamIds.current.has(userId)) {
       primaryStreamIds.current.set(userId, stream.id)
@@ -612,18 +682,32 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         startRemoteVAD(userId, stream)
       }
 
-      // Set up audio element
+      // Set up audio element with Web Audio GainNode for volume > 100%
       const existingEl = document.getElementById(`remote-audio-${userId}`)
       if (existingEl) existingEl.remove()
+      const oldGain = remoteGainRef.current.get(userId)
+      if (oldGain) { oldGain.ctx.close().catch(() => {}); remoteGainRef.current.delete(userId) }
 
       const settings = getSettings()
       const audio = document.createElement('audio')
       audio.id = `remote-audio-${userId}`
-      audio.srcObject = stream
       audio.autoplay = true
-      const userVol = settings.userVolumes?.[userId] ?? 100
-      audio.volume = Math.min((userVol / 100) * (settings.outputVolume / 100), 1)
       audio.setAttribute('playsinline', '')
+
+      // Route through GainNode for amplification
+      const actx = new AudioContext()
+      if (actx.state === 'suspended') await actx.resume()
+      const source = actx.createMediaStreamSource(stream)
+      const gain = actx.createGain()
+      const userVol = settings.userVolumes?.[userId] ?? 100
+      gain.gain.value = (userVol / 100) * (settings.outputVolume / 100)
+      source.connect(gain)
+      gain.connect(actx.destination)
+      remoteGainRef.current.set(userId, { ctx: actx, gain })
+
+      // Still need the audio element for setSinkId
+      audio.srcObject = stream
+      audio.volume = 0 // Mute the raw element; GainNode handles volume
       remoteAudioRef.current?.appendChild(audio)
 
       if (settings.audioOutputDevice && 'setSinkId' in audio) {
@@ -643,21 +727,46 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
 
       // Play screen share audio if present
       if (stream.getAudioTracks().length > 0) {
+        console.log(`[ScreenAudio] Received ${stream.getAudioTracks().length} audio track(s) from ${userId}`, stream.getAudioTracks().map(t => ({ id: t.id, label: t.label, readyState: t.readyState, muted: t.muted })))
         const existingScreenAudio = document.getElementById(`remote-screen-audio-${userId}`)
         if (existingScreenAudio) existingScreenAudio.remove()
+        const oldScreenGain = remoteGainRef.current.get(`screen-${userId}`)
+        if (oldScreenGain) { oldScreenGain.ctx.close().catch(() => {}); remoteGainRef.current.delete(`screen-${userId}`) }
+
         const settings = getSettings()
+        const userVol = settings.userVolumes?.[userId] ?? 100
+        const effectiveVol = (userVol / 100) * (settings.outputVolume / 100)
+
         const screenAudio = document.createElement('audio')
         screenAudio.id = `remote-screen-audio-${userId}`
-        screenAudio.srcObject = stream
         screenAudio.autoplay = true
-        const userVol = settings.userVolumes?.[userId] ?? 100
-        screenAudio.volume = Math.min((userVol / 100) * (settings.outputVolume / 100), 1)
         screenAudio.setAttribute('playsinline', '')
+        screenAudio.srcObject = stream
+
+        if (effectiveVol > 1) {
+          // Volume > 100%: use AudioContext for amplification, mute native element
+          const sctx = new AudioContext()
+          await sctx.resume()
+          const ssource = sctx.createMediaStreamSource(stream)
+          const sgain = sctx.createGain()
+          sgain.gain.value = effectiveVol
+          ssource.connect(sgain)
+          sgain.connect(sctx.destination)
+          remoteGainRef.current.set(`screen-${userId}`, { ctx: sctx, gain: sgain })
+          screenAudio.volume = 0
+        } else {
+          // Volume ≤ 100%: use native audio element directly (most compatible)
+          screenAudio.volume = Math.max(0, effectiveVol)
+        }
+
         remoteAudioRef.current?.appendChild(screenAudio)
+        screenAudio.play().catch(() => {})
         if (settings.audioOutputDevice && 'setSinkId' in screenAudio) {
           (screenAudio as HTMLAudioElement & { setSinkId: (id: string) => Promise<void> })
             .setSinkId(settings.audioOutputDevice).catch(() => {})
         }
+      } else {
+        console.log(`[ScreenAudio] No audio tracks in screen share stream from ${userId}`)
       }
 
       // Detect when screen share tracks end
@@ -741,6 +850,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     const newMuted = !muted
     stream.getAudioTracks().forEach((t) => { t.enabled = !newMuted })
     setMuted(newMuted)
+    mutedRef.current = newMuted
     broadcastMediaState({ muted: newMuted })
   }
 
@@ -827,13 +937,42 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       await renegotiateAllPeers()
     } else {
       try {
-        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+        const screenSettings = getSettings()
+        const videoConstraints: Record<string, unknown> = {}
+        if (screenSettings.screenShareResolution > 0) {
+          videoConstraints.height = { ideal: screenSettings.screenShareResolution }
+          // Map height to width for standard aspect ratio
+          const widths: Record<number, number> = { 360: 640, 480: 854, 720: 1280, 1080: 1920, 1440: 2560 }
+          if (widths[screenSettings.screenShareResolution]) {
+            videoConstraints.width = { ideal: widths[screenSettings.screenShareResolution] }
+          }
+        }
+        if (screenSettings.screenShareFramerate > 0) {
+          videoConstraints.frameRate = { ideal: screenSettings.screenShareFramerate }
+        }
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({
+          video: Object.keys(videoConstraints).length > 0 ? videoConstraints : true,
+          audio: true,
+          // @ts-expect-error -- Chrome: prefer including system audio
+          systemAudio: 'include',
+          selfBrowserSurface: 'include',
+        })
         screenStreamRef.current = screenStream
         if (localScreenRef.current) {
           localScreenRef.current.srcObject = screenStream
         }
+        const screenHasAudio = screenStream.getAudioTracks().length > 0
+        console.log(`[ScreenShare] Captured ${screenStream.getTracks().length} tracks: ${screenStream.getVideoTracks().length} video, ${screenStream.getAudioTracks().length} audio`)
+        if (!screenHasAudio) {
+          console.warn('[ScreenShare] No audio tracks captured. On Firefox/Linux, screen share audio only works when sharing a browser tab (not a window or entire screen).')
+        }
+        // Add tracks to peer connections — include streamId so receiver can group them
         screenStream.getTracks().forEach((t) => {
-          // Add to peer connections with screenStream (not localStream) so remote gets a separate stream
+          // Hint encoder to prioritize detail/sharpness for screen content
+          if (t.kind === 'video' && 'contentHint' in t) {
+            t.contentHint = 'detail'
+          }
+          console.log(`[ScreenShare] Adding ${t.kind} track (${t.label}) to ${peersRef.current.size} peers`)
           for (const pc of peersRef.current.values()) {
             pc.pc.addTrack(t, screenStream)
           }
@@ -859,6 +998,8 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         )
         broadcastMediaState({ screenSharing: true })
         await renegotiateAllPeers()
+        // Apply maxBitrate to screen share video senders
+        applyScreenShareBitrate()
       } catch (err) {
         console.error('Failed to share screen:', err)
       }
@@ -876,6 +1017,32 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     }
   }
 
+  function applyScreenShareBitrate() {
+    const settings = getSettings()
+    const maxBitrateKbps = settings.screenShareMaxBitrate
+    if (!screenStreamRef.current) return
+    const screenVideoTrack = screenStreamRef.current.getVideoTracks()[0]
+    if (!screenVideoTrack) return
+    for (const pc of peersRef.current.values()) {
+      const sender = pc.pc.getSenders().find(s => s.track === screenVideoTrack)
+      if (sender) {
+        const params = sender.getParameters()
+        if (!params.encodings || params.encodings.length === 0) {
+          params.encodings = [{}]
+        }
+        const enc = params.encodings[0]!
+        if (maxBitrateKbps > 0) {
+          enc.maxBitrate = maxBitrateKbps * 1000
+        } else {
+          delete enc.maxBitrate
+        }
+        sender.setParameters(params).catch((err) => {
+          console.warn('[ScreenShare] Failed to set bitrate:', err)
+        })
+      }
+    }
+  }
+
   // Build display tiles: separate tiles for camera and screen
   const displayTiles: { tileId: string; userId: string; displayName: string; isSelf: boolean; speaking: boolean; type: 'user' | 'screen'; hasVideo: boolean; hasScreen: boolean }[] = []
   for (const vu of voiceUsers) {
@@ -883,12 +1050,11 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       // Two separate tiles: one for camera, one for screen
       displayTiles.push({ tileId: vu.id + '-cam', userId: vu.id, displayName: vu.displayName, isSelf: vu.isSelf, speaking: vu.speaking, type: 'user', hasVideo: true, hasScreen: false })
       displayTiles.push({ tileId: vu.id + '-screen', userId: vu.id, displayName: vu.displayName + ' (Screen)', isSelf: vu.isSelf, speaking: false, type: 'screen', hasVideo: false, hasScreen: true })
-      // Migrate watching: if user was watching the base tileId, auto-watch both split tiles
-      if (watchingTiles.has(vu.id) && (!watchingTiles.has(vu.id + '-cam') || !watchingTiles.has(vu.id + '-screen'))) {
+      // Migrate watching: if user was watching the base tileId (screen-only), only auto-watch screen tile
+      if (watchingTiles.has(vu.id) && !watchingTiles.has(vu.id + '-screen')) {
         setWatchingTiles((prev) => {
           const next = new Set(prev)
           next.delete(vu.id)
-          next.add(vu.id + '-cam')
           next.add(vu.id + '-screen')
           return next
         })
@@ -950,11 +1116,37 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       saveSettings({ ...settings, userVolumes: next })
       return next
     })
-    const effectiveVol = Math.min((volume / 100) * (getSettings().outputVolume / 100), 1)
-    const el = document.getElementById(`remote-audio-${userId}`) as HTMLAudioElement | null
-    if (el) el.volume = effectiveVol
-    const screenEl = document.getElementById(`remote-screen-audio-${userId}`) as HTMLAudioElement | null
-    if (screenEl) screenEl.volume = effectiveVol
+    const effectiveVol = (volume / 100) * (getSettings().outputVolume / 100)
+    // Update GainNodes for amplified volume (can exceed 1.0)
+    const g = remoteGainRef.current.get(userId)
+    if (g) g.gain.gain.value = effectiveVol
+    const sg = remoteGainRef.current.get(`screen-${userId}`)
+    if (sg) {
+      sg.gain.gain.value = effectiveVol
+    } else {
+      // No AudioContext for screen audio — update native audio element
+      const screenAudioEl = document.getElementById(`remote-screen-audio-${userId}`) as HTMLAudioElement | null
+      if (screenAudioEl) {
+        if (effectiveVol > 1) {
+          // Need to switch to AudioContext for amplification
+          const stream = screenAudioEl.srcObject as MediaStream | null
+          if (stream && stream.getAudioTracks().length > 0) {
+            const sctx = new AudioContext()
+            sctx.resume().then(() => {
+              const ssource = sctx.createMediaStreamSource(stream)
+              const sgain = sctx.createGain()
+              sgain.gain.value = effectiveVol
+              ssource.connect(sgain)
+              sgain.connect(sctx.destination)
+              remoteGainRef.current.set(`screen-${userId}`, { ctx: sctx, gain: sgain })
+              screenAudioEl.volume = 0
+            })
+          }
+        } else {
+          screenAudioEl.volume = Math.max(0, effectiveVol)
+        }
+      }
+    }
   }
 
   const renderTile = (tile: typeof displayTiles[0], isFocused: boolean, isUnfocused: boolean) => {
@@ -1012,13 +1204,20 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
                   }
                 }} autoPlay playsInline muted />
               ) : remoteScreen ? (
-                <video autoPlay playsInline muted ref={(el) => { if (el && el.srcObject !== remoteScreen) el.srcObject = remoteScreen }} />
+                <video autoPlay playsInline muted ref={(el) => {
+                  if (el && el.srcObject !== remoteScreen) {
+                    el.srcObject = remoteScreen
+                    if ('latencyMode' in el) (el as any).latencyMode = 'realtime'
+                  }
+                }} />
               ) : null}
             </div>
-            <div className="voice-tile-overlay">
-              <span className="voice-tile-name">{tile.displayName}'s screen</span>
-              {badges}
-            </div>
+            {!isFullscreen && (
+              <div className="voice-tile-overlay">
+                <span className="voice-tile-name">{tile.displayName}'s screen</span>
+                {badges}
+              </div>
+            )}
           </div>
         </div>
       )
@@ -1042,7 +1241,12 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
                   }
                 }} autoPlay playsInline muted />
               ) : remoteStream ? (
-                <video autoPlay playsInline muted ref={(el) => { if (el && el.srcObject !== remoteStream) el.srcObject = remoteStream }} />
+                <video autoPlay playsInline muted ref={(el) => {
+                  if (el && el.srcObject !== remoteStream) {
+                    el.srcObject = remoteStream
+                    if ('latencyMode' in el) (el as any).latencyMode = 'realtime'
+                  }
+                }} />
               ) : null}
             </div>
             <div className="voice-tile-overlay">
@@ -1072,9 +1276,23 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
   const focusedTile = hasFocused ? sortedTiles[0] : null
   const unfocusedTiles = hasFocused ? sortedTiles.slice(1) : []
 
+  const [fsShowControls, setFsShowControls] = useState(false)
+  const fsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const handleFsMouseMove = (e: React.MouseEvent) => {
+    if (!isFullscreen) return
+    const h = window.innerHeight
+    const nearEdge = e.clientY < 60 || e.clientY > h - 80
+    if (nearEdge) {
+      setFsShowControls(true)
+      if (fsTimerRef.current) clearTimeout(fsTimerRef.current)
+      fsTimerRef.current = setTimeout(() => setFsShowControls(false), 3000)
+    }
+  }
+
   return (
-    <div className="voice-channel" ref={containerRef}>
-      <div className="voice-header">
+    <div className={`voice-channel ${isFullscreen ? 'is-fullscreen' : ''}`} ref={containerRef} onMouseMove={handleFsMouseMove}>
+      <div className={`voice-header ${isFullscreen ? (fsShowControls ? 'fs-visible' : 'fs-hidden') : ''}`}>
         <span className="voice-header-name">🔊 {channel.name}</span>
         {joined && <span className="voice-status connected">Connected</span>}
         {connecting && <span className="voice-status connecting">Connecting…</span>}
@@ -1083,14 +1301,46 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
             {isFullscreen ? '⊠' : '⛶'}
           </button>
         )}
+        {onToggleMembers && !isFullscreen && (
+          <button
+            className={`chat-header-toggle ${showMembers ? 'active' : ''}`}
+            onClick={onToggleMembers}
+            title={showMembers ? 'Hide Members' : 'Show Members'}
+          >
+            👥
+          </button>
+        )}
       </div>
+
+      {isFullscreen && (
+        <div className={`voice-fs-controls ${fsShowControls ? 'fs-visible' : 'fs-hidden'}`}>
+          <button className={`voice-ctrl-btn ${muted ? 'active' : ''}`} onClick={toggleMute} title={muted ? 'Unmute' : 'Mute'}>
+            {muted ? '🔇' : '🎙️'}
+          </button>
+          <button className={`voice-ctrl-btn ${deafened ? 'active' : ''}`} onClick={toggleDeafen} title={deafened ? 'Undeafen' : 'Deafen'}>
+            {deafened ? '🔈' : '🔊'}
+          </button>
+          <button className={`voice-ctrl-btn ${videoOn ? 'active' : ''}`} onClick={toggleVideo} title={videoOn ? 'Camera Off' : 'Camera On'}>
+            📷
+          </button>
+          <button className={`voice-ctrl-btn ${screenSharing ? 'active' : ''}`} onClick={toggleScreenShare} title={screenSharing ? 'Stop Sharing' : 'Share Screen'}>
+            🖥️
+          </button>
+          <button className="voice-ctrl-btn" onClick={toggleFullscreen} title="Exit Fullscreen">
+            ⊠
+          </button>
+          <button className="voice-leave-btn" onClick={leaveVoice} title="Disconnect">
+            📞
+          </button>
+        </div>
+      )}
 
       {hasFocused ? (
         <div className="voice-tile-grid focused-layout">
           <div className="voice-focused-main">
             {focusedTile && renderTile(focusedTile, true, false)}
           </div>
-          {unfocusedTiles.length > 0 && (
+          {unfocusedTiles.length > 0 && !isFullscreen && (
             <div className="voice-focused-sidebar">
               {unfocusedTiles.map((t) => renderTile(t, false, true))}
             </div>

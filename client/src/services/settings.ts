@@ -13,6 +13,9 @@ export interface MediaSettings {
   noiseGateEnabled: boolean  // client-side noise gate
   noiseGateThreshold: number // 0-100 noise gate threshold
   userVolumes: Record<string, number>  // per-user volume overrides (userId -> 0-200)
+  screenShareResolution: number // 0 = native, 360, 480, 720, 1080, 1440
+  screenShareFramerate: number  // 15, 30, 60, 120
+  screenShareMaxBitrate: number // 0 = auto, in kbps (e.g. 2500, 5000, 8000, 15000)
 }
 
 const STORAGE_KEY = 'relay_media_settings'
@@ -30,6 +33,9 @@ const defaults: MediaSettings = {
   noiseGateEnabled: false,
   noiseGateThreshold: 15,
   userVolumes: {},
+  screenShareResolution: 0,
+  screenShareFramerate: 30,
+  screenShareMaxBitrate: 8000,
 }
 
 export function getSettings(): MediaSettings {

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Channel } from '../types'
 import * as api from '../services/api'
+import { useAuth } from '../context/AuthContext'
 import ChannelSettings from './ChannelSettings'
 
 export interface VoicePresenceUser {
@@ -23,9 +24,13 @@ interface Props {
   serverId?: string
   onChannelsChanged?: () => void
   unreadChannels?: Record<string, { count: number; mentioned: boolean }>
+  onVoiceUserVolumeChange?: (userId: string, volume: number) => void
+  getVoiceUserVolume?: (userId: string) => number
+  onVoiceKick?: (channelId: string, userId: string) => void
 }
 
-export default function ChannelList({ channels, selected, onSelect, voicePresence, isAdmin, serverId, onChannelsChanged, unreadChannels }: Props) {
+export default function ChannelList({ channels, selected, onSelect, voicePresence, isAdmin, serverId, onChannelsChanged, unreadChannels, onVoiceUserVolumeChange, getVoiceUserVolume, onVoiceKick }: Props) {
+  const { user: me } = useAuth()
   const textChannels = channels.filter((c) => c.type === 'text')
   const voiceChannels = channels.filter((c) => c.type === 'voice')
   const [settingsChannel, setSettingsChannel] = useState<Channel | null>(null)
@@ -34,6 +39,8 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
   const [createDescription, setCreateDescription] = useState('')
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const [voiceCtxMenu, setVoiceCtxMenu] = useState<{ x: number; y: number; userId: string; displayName: string; channelId: string } | null>(null)
+  const [voiceCtxVolume, setVoiceCtxVolume] = useState(100)
 
   const handleCreateStart = (type: 'text' | 'voice') => {
     setCreatingType(type)
@@ -189,7 +196,12 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
                 {users.length > 0 && (
                   <div className="voice-channel-users">
                     {users.map((u) => (
-                      <div key={u.id} className="voice-channel-user">
+                      <div key={u.id} className="voice-channel-user" onContextMenu={(e) => {
+                        if (u.id === me?.id) return
+                        e.preventDefault()
+                        setVoiceCtxVolume(getVoiceUserVolume?.(u.id) ?? 100)
+                        setVoiceCtxMenu({ x: e.clientX, y: e.clientY, userId: u.id, displayName: u.displayName, channelId: ch.id })
+                      }}>
                         <span className={`voice-channel-user-dot ${u.speaking ? 'speaking' : ''}`} />
                         <span className="voice-channel-user-name">{u.displayName}</span>
                         <span className="voice-channel-user-icons">
@@ -217,6 +229,40 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
           onChannelUpdated={() => { setSettingsChannel(null); onChannelsChanged?.() }}
           onChannelDeleted={() => { setSettingsChannel(null); onChannelsChanged?.() }}
         />,
+        document.body
+      )}
+
+      {voiceCtxMenu && createPortal(
+        <div className="voice-context-menu-overlay" onClick={() => setVoiceCtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setVoiceCtxMenu(null) }}>
+          <div className="voice-context-menu" style={{ left: voiceCtxMenu.x, top: voiceCtxMenu.y }} onClick={(e) => e.stopPropagation()}>
+            <div className="voice-context-menu-header">{voiceCtxMenu.displayName}</div>
+            <div className="voice-context-menu-item volume-control">
+              <label>
+                <span>Volume</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={200}
+                  value={voiceCtxVolume}
+                  onChange={(e) => {
+                    const vol = Number(e.target.value)
+                    setVoiceCtxVolume(vol)
+                    onVoiceUserVolumeChange?.(voiceCtxMenu.userId, vol)
+                  }}
+                />
+                <span className="volume-value">{voiceCtxVolume}%</span>
+              </label>
+            </div>
+            {isAdmin && (
+              <button className="voice-context-menu-item kick" onClick={() => {
+                onVoiceKick?.(voiceCtxMenu.channelId, voiceCtxMenu.userId)
+                setVoiceCtxMenu(null)
+              }}>
+                Kick from Voice
+              </button>
+            )}
+          </div>
+        </div>,
         document.body
       )}
     </div>

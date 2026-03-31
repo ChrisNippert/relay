@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Channel, Friendship, User, WSMessage } from '../types'
 import * as api from '../services/api'
 import { useAuth } from '../context/AuthContext'
@@ -29,6 +29,7 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, 
   const [friends, setFriends] = useState<Friendship[]>([])
   const [friendUsers, setFriendUsers] = useState<Map<string, User>>(new Map())
   const [dmByUser, setDmByUser] = useState<Map<string, Channel>>(new Map())
+  const [dmUserNames, setDmUserNames] = useState<Map<string, string>>(new Map())
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [confirmUnfriend, setConfirmUnfriend] = useState<string | null>(null)
@@ -38,6 +39,15 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, 
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set())
   const [archivedDMs, setArchivedDMs] = useState<Set<string>>(() => getArchivedDMs())
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; friendshipId: string; userId: string; displayName: string } | null>(null)
+
+  const dmByUserRef = useRef(dmByUser)
+  dmByUserRef.current = dmByUser
+  const archivedDMsRef = useRef(archivedDMs)
+  archivedDMsRef.current = archivedDMs
+  const userRef = useRef(user)
+  userRef.current = user
+  const onArchiveDMRef = useRef(onArchiveDM)
+  onArchiveDMRef.current = onArchiveDM
 
   const loadFriends = () => {
     api.getFriends().then(async (fs) => {
@@ -54,25 +64,27 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, 
     }).catch(console.error)
   }
 
-  // Resolve DM channels to their other participant
   useEffect(() => {
     const resolveDMs = async () => {
       const map = new Map<string, Channel>()
+      const names = new Map<string, string>()
       for (const ch of dmChannels) {
         try {
-          // DM participants: get the channel's participants to find the other user
-          // We use the channel ID to look up who's in it via the dm_participants
-          // The name field on the channel is empty, so we need to map channel→user
           const parts = await api.getDMParticipants(ch.id)
           const otherId = parts.find((id: string) => id !== user?.id)
           if (otherId) {
             map.set(otherId, ch)
+            try {
+              const u = await api.getUser(otherId)
+              names.set(otherId, u.display_name)
+            } catch { /* skip */ }
           }
         } catch {
           // Fallback: if no endpoint, skip
         }
       }
       setDmByUser(map)
+      setDmUserNames(names)
     }
     resolveDMs()
   }, [dmChannels, user?.id])
@@ -80,6 +92,30 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, 
   useEffect(() => {
     loadFriends()
   }, [user?.id])
+
+  // Auto-unarchive DMs for accepted friends (handles both local accept + WS-driven reloads)
+  useEffect(() => {
+    const acceptedIds = new Set<string>()
+    for (const f of friends) {
+      if (f.status === 'accepted') {
+        const otherId = f.user_id === user?.id ? f.friend_id : f.user_id
+        acceptedIds.add(otherId)
+      }
+    }
+    const cur = archivedDMsRef.current
+    let changed = false
+    const next = new Set(cur)
+    for (const [uid, ch] of dmByUser) {
+      if (acceptedIds.has(uid) && next.has(ch.id)) {
+        next.delete(ch.id)
+        changed = true
+      }
+    }
+    if (changed) {
+      saveArchivedDMs(next)
+      setArchivedDMs(next)
+    }
+  }, [friends, dmByUser, user?.id])
 
   // Track online status from user data and WS presence
   useEffect(() => {
@@ -102,11 +138,23 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, 
           return next
         })
       } else if (msg.type === 'friend_request' || msg.type === 'friend_accepted') {
-        // Reload friends list when we receive a new request or acceptance
         loadFriends()
       } else if (msg.type === 'friend_removed') {
-        const p = msg.payload as { friendship_id: string }
+        const p = msg.payload as { friendship_id: string; user_id: string }
         setFriends((prev) => prev.filter((f) => f.id !== p.friendship_id))
+        // Archive the DM with the user who removed us
+        if (p.user_id) {
+          const dmCh = dmByUserRef.current.get(p.user_id)
+          if (dmCh) {
+            setArchivedDMs((prev) => {
+              const next = new Set(prev)
+              next.add(dmCh.id)
+              saveArchivedDMs(next)
+              return next
+            })
+            onArchiveDMRef.current?.(dmCh.id)
+          }
+        }
       }
     })
     return unsub
@@ -183,6 +231,8 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, 
     }
   }
 
+  const [showArchived, setShowArchived] = useState(false)
+
   // Deduplicate friends by the other user's ID, only show if user data is loaded
   const seen = new Set<string>()
   const accepted = friends.filter((f) => {
@@ -194,6 +244,25 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, 
     return true
   })
   const pending = friends.filter((f) => f.status === 'pending')
+
+  // Split accepted into active and archived
+  const activeFriends = accepted.filter((f) => {
+    const otherId = f.user_id === user?.id ? f.friend_id : f.user_id
+    const dmCh = dmByUser.get(otherId)
+    return !dmCh || !archivedDMs.has(dmCh.id)
+  })
+
+  // Archived DMs: any DM channel in archivedDMs set, regardless of friend status
+  const archivedDMList: { channelId: string; userId: string; displayName: string }[] = []
+  for (const [uid, ch] of dmByUser) {
+    if (archivedDMs.has(ch.id)) {
+      archivedDMList.push({
+        channelId: ch.id,
+        userId: uid,
+        displayName: friendUsers.get(uid)?.display_name ?? dmUserNames.get(uid) ?? uid,
+      })
+    }
+  }
 
   return (
     <div className="friends-list">
@@ -227,34 +296,21 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, 
         </div>
       )}
 
-      {accepted.length > 0 && (
+      {activeFriends.length > 0 && (
         <>
           <h3 className="channel-category">Friends</h3>
-          {accepted.map((f) => {
+          {activeFriends.map((f) => {
             const otherId = f.user_id === user?.id ? f.friend_id : f.user_id
             const u = friendUsers.get(otherId)
             const hasDM = dmByUser.has(otherId)
-            const dmCh = dmByUser.get(otherId)
-            const isArchived = dmCh ? archivedDMs.has(dmCh.id) : false
             return (
-              <div key={f.id} className={`friend-item${isArchived ? ' archived' : ''}`} onContextMenu={(e) => {
+              <div key={f.id} className="friend-item" onContextMenu={(e) => {
                 e.preventDefault()
                 setCtxMenu({ x: e.clientX, y: e.clientY, friendshipId: f.id, userId: otherId, displayName: u?.display_name ?? otherId })
               }}>
                 <button
                   className={`channel-item ${hasDM ? 'has-dm' : ''}`}
-                  onClick={() => {
-                    // Unarchive if archived when clicking
-                    if (isArchived && dmCh) {
-                      setArchivedDMs((prev) => {
-                        const next = new Set(prev)
-                        next.delete(dmCh.id)
-                        saveArchivedDMs(next)
-                        return next
-                      })
-                    }
-                    handleOpenDM(otherId)
-                  }}
+                  onClick={() => handleOpenDM(otherId)}
                 >
                   <span className={`friend-status ${onlineUsers.has(otherId) ? 'online' : 'offline'}`}>●</span>
                   {u?.display_name ?? otherId}
@@ -340,6 +396,25 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, 
               </div>
             )
           })}
+        </>
+      )}
+
+      {archivedDMList.length > 0 && (
+        <>
+          <h3 className="channel-category archived-header" onClick={() => setShowArchived(!showArchived)} style={{ cursor: 'pointer', userSelect: 'none' }}>
+            {showArchived ? '▾' : '▸'} Archived ({archivedDMList.length})
+          </h3>
+          {showArchived && archivedDMList.map((item) => (
+            <div key={item.channelId} className="friend-item archived">
+              <button
+                className="channel-item has-dm"
+                onClick={() => handleOpenDM(item.userId)}
+              >
+                <span className={`friend-status ${onlineUsers.has(item.userId) ? 'online' : 'offline'}`}>●</span>
+                {item.displayName}
+              </button>
+            </div>
+          ))}
         </>
       )}
 

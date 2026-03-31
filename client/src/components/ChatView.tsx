@@ -1030,7 +1030,9 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                 )}
               </div>
               <div className="message-gutter">
-                {isGrouped && <span className="message-gutter-time">{formatTime(m.created_at)}</span>}
+                {isGrouped && (
+                  <span className="message-gutter-time">{formatTime(m.created_at)}</span>
+                )}
               </div>
               <div className="message-content">
                 {/* Reply indicator */}

@@ -75,13 +75,14 @@ export default function SettingsPanel({ onClose }: Props) {
       return
     }
     try {
+      const curSettings = getSettings()
       const constraints: MediaStreamConstraints = {
         audio: {
-          noiseSuppression: settings.noiseSuppression,
-          echoCancellation: settings.echoCancellation,
-          autoGainControl: settings.autoGainControl,
-          channelCount: settings.channelCount,
-          ...(settings.audioInputDevice ? { deviceId: { exact: settings.audioInputDevice } } : {}),
+          noiseSuppression: curSettings.noiseSuppression,
+          echoCancellation: false,
+          autoGainControl: curSettings.autoGainControl,
+          channelCount: curSettings.channelCount,
+          ...(curSettings.audioInputDevice ? { deviceId: { exact: curSettings.audioInputDevice } } : {}),
         },
       }
       const stream = await navigator.mediaDevices.getUserMedia(constraints)
@@ -89,18 +90,19 @@ export default function SettingsPanel({ onClose }: Props) {
 
       // Set up loopback audio playback
       const ctx = new AudioContext()
+      if (ctx.state === 'suspended') await ctx.resume()
       micTestCtxRef.current = ctx
       const source = ctx.createMediaStreamSource(stream)
       const analyser = ctx.createAnalyser()
-      analyser.fftSize = 512
-      analyser.smoothingTimeConstant = 0.4
+      analyser.fftSize = 256
+      analyser.smoothingTimeConstant = 0.3
       source.connect(analyser)
 
-      // Noise gate for loopback
-      const gain = ctx.createGain()
-      gain.gain.value = 1
-      source.connect(gain)
-      gain.connect(ctx.destination)
+      // Loopback: play mic audio back through speakers so user can hear themselves
+      const loopbackGain = ctx.createGain()
+      loopbackGain.gain.value = 1
+      source.connect(loopbackGain)
+      loopbackGain.connect(ctx.destination)
 
       // Level meter animation loop
       const dataArray = new Uint8Array(analyser.frequencyBinCount)
@@ -109,12 +111,17 @@ export default function SettingsPanel({ onClose }: Props) {
         let sum = 0
         for (let i = 0; i < dataArray.length; i++) sum += dataArray[i]!
         const avg = sum / dataArray.length
-        setMicLevel(avg)
+        // Normalize to 0-100 range (frequency data averages around 0-60 for speech)
+        const normalized = Math.min((avg / 60) * 100, 100)
+        setMicLevel(normalized)
 
-        // Apply noise gate if enabled
-        if (settings.noiseGateEnabled) {
-          const speaking = avg > settings.noiseGateThreshold
-          gain.gain.setTargetAtTime(speaking ? 1 : 0, ctx.currentTime, 0.01)
+        // Apply noise gate to loopback
+        const liveSettings = getSettings()
+        if (liveSettings.noiseGateEnabled) {
+          const speaking = normalized > liveSettings.noiseGateThreshold
+          loopbackGain.gain.setTargetAtTime(speaking ? 1 : 0, ctx.currentTime, 0.01)
+        } else {
+          loopbackGain.gain.setTargetAtTime(1, ctx.currentTime, 0.01)
         }
 
         micTestAnimRef.current = requestAnimationFrame(check)
@@ -427,6 +434,50 @@ export default function SettingsPanel({ onClose }: Props) {
                   ref={(el) => { if (el) el.srcObject = cameraStream }}
                 />
               )}
+
+              <h3 className="settings-section">Screen Share</h3>
+              <label className="settings-slider">
+                <span>Resolution</span>
+                <select
+                  value={settings.screenShareResolution}
+                  onChange={(e) => update({ screenShareResolution: Number(e.target.value) })}
+                >
+                  <option value={0}>Native</option>
+                  <option value={360}>360p</option>
+                  <option value={480}>480p</option>
+                  <option value={720}>720p</option>
+                  <option value={1080}>1080p</option>
+                  <option value={1440}>2K (1440p)</option>
+                </select>
+              </label>
+              <label className="settings-slider">
+                <span>Framerate</span>
+                <select
+                  value={settings.screenShareFramerate}
+                  onChange={(e) => update({ screenShareFramerate: Number(e.target.value) })}
+                >
+                  <option value={15}>15 fps</option>
+                  <option value={30}>30 fps</option>
+                  <option value={60}>60 fps</option>
+                  <option value={120}>120 fps</option>
+                </select>
+              </label>
+              <label className="settings-slider">
+                <span>Max Bitrate</span>
+                <select
+                  value={settings.screenShareMaxBitrate}
+                  onChange={(e) => update({ screenShareMaxBitrate: Number(e.target.value) })}
+                >
+                  <option value={0}>Auto</option>
+                  <option value={1500}>1.5 Mbps (Low)</option>
+                  <option value={3000}>3 Mbps</option>
+                  <option value={5000}>5 Mbps</option>
+                  <option value={8000}>8 Mbps (Default)</option>
+                  <option value={12000}>12 Mbps</option>
+                  <option value={20000}>20 Mbps (High)</option>
+                  <option value={50000}>50 Mbps (Max)</option>
+                </select>
+              </label>
             </div>
           )
         )}
