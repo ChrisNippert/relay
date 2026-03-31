@@ -95,7 +95,7 @@ All endpoints require `Authorization: Bearer <token>` unless noted.
 | Method | Path | Body | Description |
 |--------|------|------|-------------|
 | GET | `/api/users/me` | — | Your profile |
-| PUT | `/api/users/me` | `{display_name?, avatar_url?}` | Update profile |
+| PUT | `/api/users/me` | `{display_name?, avatar_url?, custom_status?, name_color?}` | Update profile |
 | GET | `/api/users/{id}` | — | Get user by ID |
 | GET | `/api/users/search?q=term` | — | Search by username/display name |
 | PUT | `/api/users/me/public-key` | `{public_key}` | Set E2E public key |
@@ -118,10 +118,11 @@ All endpoints require `Authorization: Bearer <token>` unless noted.
 | GET | `/api/servers/{id}` | — | Get server details |
 | PUT | `/api/servers/{id}` | `{name?, icon_url?}` | Update (admin only) |
 | DELETE | `/api/servers/{id}` | — | Delete (owner only) |
-| POST | `/api/servers/{id}/join` | — | Join server |
 | POST | `/api/servers/{id}/leave` | — | Leave server |
 | GET | `/api/servers/{id}/members` | — | List members |
+| GET | `/api/servers/{id}/online` | — | List online user IDs in server |
 | PUT | `/api/servers/{sid}/members/{uid}/role` | `{role}` | Change member role (admin only) |
+| DELETE | `/api/servers/{sid}/members/{uid}` | — | Kick member (admin only) |
 
 ### Invites
 
@@ -138,7 +139,7 @@ All endpoints require `Authorization: Bearer <token>` unless noted.
 |--------|------|------|-------------|
 | GET | `/api/servers/{id}/channels` | — | List channels |
 | POST | `/api/servers/{id}/channels` | `{name, type}` | Create channel (admin only). Type: `text` or `voice` |
-| PUT | `/api/channels/{id}` | `{name}` | Rename channel |
+| PUT | `/api/channels/{id}` | `{name, description?}` | Update channel |
 | DELETE | `/api/channels/{id}` | — | Delete channel (admin only) |
 | PUT | `/api/servers/{id}/channels/positions` | `{positions: {channelId: number}}` | Reorder channels |
 
@@ -157,6 +158,7 @@ DMs are just channels with no `server_id`. Creating a DM with the same user twic
 | Method | Path | Body | Description |
 |--------|------|------|-------------|
 | GET | `/api/channels/{id}/messages?limit=50&offset=0` | — | Fetch history (newest first, max 100) |
+| GET | `/api/channels/{id}/messages/search?q=term&limit=50` | — | Search messages in channel (max 100) |
 | PUT | `/api/messages/{id}` | `{content}` | Edit message (owner only) |
 | DELETE | `/api/messages/{id}` | — | Soft-delete message (owner only) |
 | GET | `/api/messages/{id}/history` | — | Get edit history |
@@ -184,12 +186,14 @@ Allowed types: jpg, jpeg, png, gif, webp, mp4, webm, mp3, ogg, wav, pdf, txt, zi
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/channels/{id}/voice-users` | List users in a voice channel |
+| GET | `/api/ice-servers` | Get ICE/TURN server configuration for WebRTC |
 
 ### Other
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Health check (no auth required) |
+| POST | `/api/auth/logout` | Revoke current token |
 | GET | `/api/og?url=...` | Fetch OpenGraph metadata for a URL |
 
 ---
@@ -318,21 +322,92 @@ The server relays WebRTC signals between peers. Media flows peer-to-peer, not th
 
 **Send** (client → server, forwarded to target):
 ```json
-{"type": "call_offer",     "payload": {"target_user_id": "uuid", "channel_id": "uuid", "signal": {SDP}}}
-{"type": "call_answer",    "payload": {"target_user_id": "uuid", "channel_id": "uuid", "signal": {SDP}}}
-{"type": "ice_candidate",  "payload": {"target_user_id": "uuid", "channel_id": "uuid", "signal": {ICE}}}
-{"type": "call_end",       "payload": {"target_user_id": "uuid", "channel_id": "uuid"}}
+{"type": "call_offer",        "payload": {"target_user_id": "uuid", "channel_id": "uuid", "signal": {SDP}}}
+{"type": "call_answer",       "payload": {"target_user_id": "uuid", "channel_id": "uuid", "signal": {SDP}}}
+{"type": "call_renegotiate",  "payload": {"target_user_id": "uuid", "channel_id": "uuid", "signal": {SDP}}}
+{"type": "ice_candidate",     "payload": {"target_user_id": "uuid", "channel_id": "uuid", "signal": {ICE}}}
+{"type": "call_end",          "payload": {"target_user_id": "uuid", "channel_id": "uuid"}}
 ```
 
 **Receive** (target user):
 ```json
-{"type": "call_offer",     "payload": {"from_user_id": "uuid", "channel_id": "uuid", "signal": {SDP}}}
-{"type": "call_answer",    "payload": {"from_user_id": "uuid", "channel_id": "uuid", "signal": {SDP}}}
-{"type": "ice_candidate",  "payload": {"from_user_id": "uuid", "channel_id": "uuid", "signal": {ICE}}}
-{"type": "call_end",       "payload": {"from_user_id": "uuid", "channel_id": "uuid"}}
+{"type": "call_offer",        "payload": {"from_user_id": "uuid", "channel_id": "uuid", "signal": {SDP}}}
+{"type": "call_answer",       "payload": {"from_user_id": "uuid", "channel_id": "uuid", "signal": {SDP}}}
+{"type": "call_renegotiate",  "payload": {"from_user_id": "uuid", "channel_id": "uuid", "signal": {SDP}}}
+{"type": "ice_candidate",     "payload": {"from_user_id": "uuid", "channel_id": "uuid", "signal": {ICE}}}
+{"type": "call_end",          "payload": {"from_user_id": "uuid", "channel_id": "uuid"}}
 ```
 
 Note: `target_user_id` (outgoing) becomes `from_user_id` (incoming).
+
+`call_renegotiate` is used for mid-call renegotiation (e.g. ICE restart after disconnect, adding/removing media tracks).
+
+#### Voice Kick
+
+**Send** (admin → server):
+```json
+{"type": "voice_kick", "payload": {"channel_id": "uuid", "user_id": "uuid"}}
+```
+
+Server verifies admin role, removes the target user from voice, sends `voice_kicked` to the target, and broadcasts updated `voice_state`.
+
+**Receive** (kicked user):
+```json
+{"type": "voice_kicked", "payload": {"channel_id": "uuid"}}
+```
+
+#### Voice Speaking
+
+**Send** (client → server):
+```json
+{"type": "voice_speaking", "payload": {"channel_id": "uuid", "speaking": true}}
+```
+
+**Receive** (broadcast to channel, including sender):
+```json
+{"type": "voice_speaking", "payload": {"channel_id": "uuid", "user_id": "uuid", "speaking": true}}
+```
+
+#### Voice Media State
+
+Broadcasts mute/deafen/video/screenshare status to other voice participants.
+
+**Send** (client → server):
+```json
+{"type": "voice_media_state", "payload": {"channel_id": "uuid", "muted": false, "deafened": false, "video_on": false, "screen_sharing": false}}
+```
+
+**Receive** (broadcast to channel, including sender):
+```json
+{"type": "voice_media_state", "payload": {"channel_id": "uuid", "user_id": "uuid", "muted": false, "deafened": false, "video_on": false, "screen_sharing": false}}
+```
+
+#### Server Broadcast Events
+
+These events are broadcast to all members of a server via WebSocket when server state changes. They originate from REST API actions, not from client WebSocket messages.
+
+**Channel events** (broadcast to server members):
+```json
+{"type": "channel_created",    "payload": {channel object}}
+{"type": "channel_updated",    "payload": {channel object}}
+{"type": "channel_deleted",    "payload": {"id": "uuid", "server_id": "uuid"}}
+{"type": "channels_reordered", "payload": {"server_id": "uuid", "positions": {"channelId": number}}}
+```
+
+**Member events** (broadcast to server members):
+```json
+{"type": "member_joined",       "payload": {"server_id": "uuid", "user_id": "uuid"}}
+{"type": "member_left",         "payload": {"server_id": "uuid", "user_id": "uuid"}}
+{"type": "member_kicked",       "payload": {"server_id": "uuid", "user_id": "uuid"}}
+{"type": "member_role_updated", "payload": {"server_id": "uuid", "user_id": "uuid", "role": "admin|member"}}
+```
+
+**Friend events** (sent to the relevant user):
+```json
+{"type": "friend_request",  "payload": {friendship object}}
+{"type": "friend_accepted", "payload": {friendship object}}
+{"type": "friend_removed",  "payload": {friendship object}}
+```
 
 ---
 
@@ -398,8 +473,24 @@ echo '{"type":"chat_message","payload":{"channel_id":"'$CHANNEL'","content":"Hel
 | `voice_state` | server → client | Updated list of voice users |
 | `call_offer` | both | WebRTC offer (SDP) |
 | `call_answer` | both | WebRTC answer (SDP) |
+| `call_renegotiate` | both | WebRTC renegotiation (SDP) |
 | `ice_candidate` | both | WebRTC ICE candidate |
 | `call_end` | both | End a call |
+| `voice_kick` | client → server | Kick user from voice (admin) |
+| `voice_kicked` | server → client | You were kicked from voice |
+| `voice_speaking` | both | User speaking state |
+| `voice_media_state` | both | Mute/deafen/video/screen state |
+| `channel_created` | server → client | Channel was created |
+| `channel_updated` | server → client | Channel was renamed/edited |
+| `channel_deleted` | server → client | Channel was deleted |
+| `channels_reordered` | server → client | Channel positions changed |
+| `member_joined` | server → client | User joined server |
+| `member_left` | server → client | User left server |
+| `member_kicked` | server → client | User was kicked |
+| `member_role_updated` | server → client | Member role changed |
+| `friend_request` | server → client | Friend request received |
+| `friend_accepted` | server → client | Friend request accepted |
+| `friend_removed` | server → client | Friendship removed |
 | `key_request` | both | Request channel key (E2E) |
 | `channel_keys_updated` | server → client | New E2E key available |
 
