@@ -139,3 +139,7 @@ export function sendVoiceKick(channelId: string, userId: string) {
 export function sendVoiceSpeaking(channelId: string, speaking: boolean) {
   send('voice_speaking', { channel_id: channelId, speaking })
 }
+
+export function sendVoiceMediaState(channelId: string, state: { muted: boolean; deafened: boolean; videoOn: boolean; screenSharing: boolean }) {
+  send('voice_media_state', { channel_id: channelId, muted: state.muted, deafened: state.deafened, video_on: state.videoOn, screen_sharing: state.screenSharing })
+}

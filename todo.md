@@ -1,17 +1,12 @@
 BUGS
-* Have to refresh to get friend requests or update friend status
-* Voice talking status (like on and off) should show up in the voice channel sidebar like it does when 
+* unfriending doesn't kick me out of the chat. Maybe archive chats if no friends? dunno
+* When attempting a friend request, there is no place for outgoing friend requests.
+
+* Voice talking status (like on and off) should show up in the voice channel sidebar for self as well 
 * Camera causes recipients to hear echo for some reason
 
-* Users are still UUID in voice channel sometimes.
-* Selecting another voice channel disconnects from one and connects to another, but we encountered an issue where if i join him, it breaks, but if he joins a channel with me, it works fine.
-* When a user stops their video feed, it freezes on them at their last frame. When they reshare, its still stuck on that freeze frame. This is fixed when screensharing for some reason.
+* Selecting another voice channel disconnects from one and connects to another, but we encountered an issue where if i join him, it breaks, but if he joins a channel with me, it works fine. Seems to now be the other way around.
 * Message button on user popup icon is not centered horizontally, and the text is not centered vertically.
-
-TODOs later
-<!-- * Look into Web transport instead of webrtc maybe? idk webrtc only does peer to peer. -->
-* Make sure user registration info is securely stored
-* Use turn instead of stun for servers since webrtc doesn't like VPNs apparently
 
 QOL Stuff
 * User can choose mono or stereo for voice calls
@@ -26,6 +21,11 @@ QOL Stuff
 * be able to right click on names in the voice channels for kick and audio and such
 * Separate camera and video feeds as two separate cards on the voice channel page instead of having it tiny and in the corner.
 * Make watching people's streams or video feeds optional in the voice channel page.
+
+TODOs later
+<!-- * Look into Web transport instead of webrtc maybe? idk webrtc only does peer to peer. -->
+* Make sure user registration info is securely stored
+* Use turn instead of stun for servers since webrtc doesn't like VPNs apparently
 
 E2EE
 * Implement spec listed in protocol

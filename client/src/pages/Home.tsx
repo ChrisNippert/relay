@@ -33,6 +33,7 @@ export default function Home() {
   const [incomingCall, setIncomingCall] = useState<{ fromUserId: string; fromName: string; channelId: string; offer: RTCSessionDescriptionInit } | null>(null)
   const [activeVoiceChannel, setActiveVoiceChannel] = useState<Channel | null>(null)
   const voiceRef = useRef<VoiceChannelHandle>(null)
+  const pendingVoiceChannel = useRef<Channel | null>(null)
   const [voiceControls, setVoiceControls] = useState({
     muted: false, deafened: false, videoOn: false, screenSharing: false, joined: false,
   })
@@ -59,6 +60,17 @@ export default function Home() {
     const interval = setInterval(syncVoiceControls, 150)
     return () => clearInterval(interval)
   }, [activeVoiceChannel, syncVoiceControls])
+
+  // When activeVoiceChannel clears and there's a pending channel, join it after a tick
+  useEffect(() => {
+    if (activeVoiceChannel === null && pendingVoiceChannel.current) {
+      const next = pendingVoiceChannel.current
+      pendingVoiceChannel.current = null
+      // Use requestAnimationFrame to ensure React has fully unmounted the old VoiceChannel
+      const id = requestAnimationFrame(() => setActiveVoiceChannel(next))
+      return () => cancelAnimationFrame(id)
+    }
+  }, [activeVoiceChannel])
 
   // Keep ref in sync for use in WS callback
   useEffect(() => {
@@ -203,6 +215,17 @@ export default function Home() {
           ))
           return next
         })
+      } else if (msg.type === 'voice_media_state') {
+        const payload = msg.payload as { channel_id: string; user_id: string; muted: boolean; deafened: boolean; video_on: boolean; screen_sharing: boolean }
+        setVoicePresence((prev) => {
+          const users = prev.get(payload.channel_id)
+          if (!users) return prev
+          const next = new Map(prev)
+          next.set(payload.channel_id, users.map((u) =>
+            u.id === payload.user_id ? { ...u, muted: payload.muted, deafened: payload.deafened, videoOn: payload.video_on, screenSharing: payload.screen_sharing } : u
+          ))
+          return next
+        })
       }
     })
     return unsub
@@ -292,9 +315,8 @@ export default function Home() {
       // If already in a different voice channel, leave it first
       if (activeVoiceChannel && voiceRef.current) {
         voiceRef.current.leaveVoice()
-        // Small delay to let leave signals propagate before joining new channel
+        pendingVoiceChannel.current = channel
         setActiveVoiceChannel(null)
-        setTimeout(() => setActiveVoiceChannel(channel), 300)
       } else {
         setActiveVoiceChannel(channel)
       }
@@ -364,6 +386,31 @@ export default function Home() {
     setIncomingCall(null)
   }
 
+  // When a friend is removed (by us or them), clear the DM channel if active
+  const handleUnfriend = useCallback((friendUserId: string) => {
+    // If we're viewing a DM with this person, deselect it
+    const dmCh = dmChannels.find((ch) => ch.id === selectedChannel?.id)
+    if (dmCh) {
+      // Check if this DM is with the unfriended user
+      api.getDMParticipants(dmCh.id).then((parts) => {
+        if (parts.includes(friendUserId)) {
+          setSelectedChannel(null)
+        }
+      }).catch(() => {})
+    }
+  }, [dmChannels, selectedChannel?.id])
+
+  // Handle remote unfriending — clear DM if we're chatting with that user
+  useEffect(() => {
+    const unsub = subscribe((msg: WSMsg) => {
+      if (msg.type === 'friend_removed') {
+        const p = msg.payload as { friendship_id: string; user_id: string }
+        if (p.user_id) handleUnfriend(p.user_id)
+      }
+    })
+    return unsub
+  }, [handleUnfriend])
+
   const handleJoinByCode = async (code: string) => {
     if (!code) return
     try {
@@ -417,7 +464,7 @@ export default function Home() {
           <>
             <div className="sidebar-panels-container">
               <div className={`sidebar-panel ${view === 'dm' ? 'active' : ''}`}>
-                <FriendsList dmChannels={dmChannels} onSelectChannel={handleSelectChannel} onStartCall={handleStartDMCall} />
+                <FriendsList dmChannels={dmChannels} onSelectChannel={handleSelectChannel} onStartCall={handleStartDMCall} onUnfriend={handleUnfriend} />
               </div>
               <div className={`sidebar-panel ${view === 'server' ? 'active' : ''}`}>
                 <ChannelList

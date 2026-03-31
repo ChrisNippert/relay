@@ -8,6 +8,10 @@ export interface VoicePresenceUser {
   id: string
   displayName: string
   speaking?: boolean
+  muted?: boolean
+  deafened?: boolean
+  videoOn?: boolean
+  screenSharing?: boolean
 }
 
 interface Props {
@@ -182,6 +186,12 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
                       <div key={u.id} className="voice-channel-user">
                         <span className={`voice-channel-user-dot ${u.speaking ? 'speaking' : ''}`} />
                         <span className="voice-channel-user-name">{u.displayName}</span>
+                        <span className="voice-channel-user-icons">
+                          {u.muted && <span title="Muted">🔇</span>}
+                          {u.deafened && <span title="Deafened">🔈</span>}
+                          {u.videoOn && <span title="Camera">📷</span>}
+                          {u.screenSharing && <span title="Screenshare">🖥️</span>}
+                        </span>
                       </div>
                     ))}
                   </div>

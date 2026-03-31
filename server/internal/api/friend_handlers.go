@@ -156,7 +156,7 @@ func RemoveFriendHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
 		}
 		notify, _ := json.Marshal(map[string]interface{}{
 			"type":    "friend_removed",
-			"payload": map[string]string{"friendship_id": friendshipID},
+			"payload": map[string]string{"friendship_id": friendshipID, "user_id": userID},
 		})
 		hub.SendToUser(otherID, notify)
 

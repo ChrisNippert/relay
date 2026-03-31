@@ -8,9 +8,10 @@ interface Props {
   dmChannels: Channel[]
   onSelectChannel: (channel: Channel) => void
   onStartCall?: (userId: string, video: boolean) => void
+  onUnfriend?: (userId: string) => void
 }
 
-export default function FriendsList({ dmChannels, onSelectChannel, onStartCall }: Props) {
+export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, onUnfriend }: Props) {
   const { user } = useAuth()
   const [friends, setFriends] = useState<Friendship[]>([])
   const [friendUsers, setFriendUsers] = useState<Map<string, User>>(new Map())
@@ -132,10 +133,11 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall }
     }
   }
 
-  const handleUnfriend = async (friendshipId: string) => {
+  const handleUnfriend = async (friendshipId: string, friendUserId: string) => {
     try {
       await api.removeFriend(friendshipId)
       setFriends((prev) => prev.filter((f) => f.id !== friendshipId))
+      onUnfriend?.(friendUserId)
     } catch (err) {
       console.error('Failed to remove friend:', err)
     }
@@ -222,7 +224,7 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall }
                   )}
                   <button
                     className="friend-action-btn unfriend"
-                    onClick={() => handleUnfriend(f.id)}
+                    onClick={() => handleUnfriend(f.id, otherId)}
                     title="Unfriend"
                   >
                     ✕
@@ -244,7 +246,7 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall }
             return (
               <div key={f.id} className="channel-item pending">
                 <span>{u?.display_name ?? otherId}</span>
-                {isIncoming && (
+                {isIncoming ? (
                   <button
                     className="accept-btn"
                     onClick={async () => {
@@ -256,6 +258,8 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall }
                   >
                     Accept
                   </button>
+                ) : (
+                  <span className="pending-label">Sent</span>
                 )}
               </div>
             )

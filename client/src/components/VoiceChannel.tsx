@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useImperativeHandle, forwardRef } from 'react'
 import type { Channel, WSMessage as WSMsg } from '../types'
 import { useAuth } from '../context/AuthContext'
-import { subscribe, sendCallOffer, sendCallAnswer, sendIceCandidate, sendCallEnd, sendCallRenegotiate, sendVoiceJoin, sendVoiceLeave, sendVoiceKick, sendVoiceSpeaking } from '../services/ws'
+import { subscribe, sendCallOffer, sendCallAnswer, sendIceCandidate, sendCallEnd, sendCallRenegotiate, sendVoiceJoin, sendVoiceLeave, sendVoiceKick, sendVoiceSpeaking, sendVoiceMediaState } from '../services/ws'
 import { PeerConnection } from '../services/webrtc'
 import * as api from '../services/api'
 import { playJoinSound, playLeaveSound, playConnectedSound, playDisconnectedSound, playCallRing, playErrorSound } from '../services/sounds'
@@ -35,6 +35,8 @@ interface VoiceUser {
   hasVideo: boolean
   hasScreen: boolean
   speaking: boolean
+  muted: boolean
+  deafened: boolean
 }
 
 export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ channel, autoJoin, onJoin, onLeave, isAdmin }, ref) {
@@ -128,6 +130,13 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         const payload = msg.payload as { channel_id: string }
         if (payload.channel_id === channel.id) {
           kickedRef.current = true
+        }
+      } else if (msg.type === 'voice_media_state') {
+        const payload = msg.payload as { channel_id: string; user_id: string; muted: boolean; deafened: boolean; video_on: boolean; screen_sharing: boolean }
+        if (payload.channel_id === channel.id) {
+          setVoiceUsers((prev) =>
+            prev.map((u) => u.id === payload.user_id ? { ...u, muted: payload.muted, deafened: payload.deafened } : u)
+          )
         }
       }
     })
@@ -325,7 +334,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       const stream = await navigator.mediaDevices.getUserMedia({ audio: getAudioConstraints(), video: false })
       localStreamRef.current = stream
       setJoined(true)
-      setVoiceUsers([{ id: user.id, displayName: user.display_name, isSelf: true, hasVideo: false, hasScreen: false, speaking: false }])
+      setVoiceUsers([{ id: user.id, displayName: user.display_name, isSelf: true, hasVideo: false, hasScreen: false, speaking: false, muted: false, deafened: false }])
       playJoinSound()
       startVoiceActivityDetection(stream)
       onJoin?.()
@@ -369,7 +378,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       setVoiceUsers((prev) => {
         if (prev.some((u) => u.id === targetUserId)) return prev
         playConnectedSound()
-        return [...prev, { id: targetUserId, displayName: name, isSelf: false, hasVideo: false, hasScreen: false, speaking: false }]
+        return [...prev, { id: targetUserId, displayName: name, isSelf: false, hasVideo: false, hasScreen: false, speaking: false, muted: false, deafened: false }]
       })
     }
 
@@ -413,7 +422,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       setVoiceUsers((prev) => {
         if (prev.some((u) => u.id === fromUserId)) return prev
         playConnectedSound()
-        return [...prev, { id: fromUserId, displayName: name, isSelf: false, hasVideo: false, hasScreen: false, speaking: false }]
+        return [...prev, { id: fromUserId, displayName: name, isSelf: false, hasVideo: false, hasScreen: false, speaking: false, muted: false, deafened: false }]
       })
     }
 
@@ -630,12 +639,22 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     return () => clearInterval(interval)
   }, [joined])
 
+  function broadcastMediaState(overrides: { muted?: boolean; deafened?: boolean; videoOn?: boolean; screenSharing?: boolean } = {}) {
+    sendVoiceMediaState(channel.id, {
+      muted: overrides.muted ?? muted,
+      deafened: overrides.deafened ?? deafened,
+      videoOn: overrides.videoOn ?? videoOn,
+      screenSharing: overrides.screenSharing ?? screenSharing,
+    })
+  }
+
   function toggleMute() {
     const stream = localStreamRef.current
     if (!stream) return
     const newMuted = !muted
     stream.getAudioTracks().forEach((t) => { t.enabled = !newMuted })
     setMuted(newMuted)
+    broadcastMediaState({ muted: newMuted })
   }
 
   function toggleDeafen() {
@@ -645,6 +664,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       elems.forEach((a) => { (a as HTMLMediaElement).muted = newDeafened })
     }
     setDeafened(newDeafened)
+    broadcastMediaState({ deafened: newDeafened })
   }
 
   async function toggleVideo() {
@@ -664,6 +684,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       setVoiceUsers((prev) =>
         prev.map((u) => u.id === user.id ? { ...u, hasVideo: false } : u)
       )
+      broadcastMediaState({ videoOn: false })
       await renegotiateAllPeers()
     } else {
       try {
@@ -689,6 +710,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         setVoiceUsers((prev) =>
           prev.map((u) => u.id === user.id ? { ...u, hasVideo: true } : u)
         )
+        broadcastMediaState({ videoOn: true })
         await renegotiateAllPeers()
       } catch (err) {
         console.error('Failed to enable video:', err)
@@ -714,6 +736,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       setVoiceUsers((prev) =>
         prev.map((u) => u.id === user.id ? { ...u, hasScreen: false } : u)
       )
+      broadcastMediaState({ screenSharing: false })
       await renegotiateAllPeers()
     } else {
       try {
@@ -739,6 +762,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
             )
             screenStreamRef.current = null
             if (localScreenRef.current) localScreenRef.current.srcObject = null
+            broadcastMediaState({ screenSharing: false })
             renegotiateAllPeers()
           }
         })
@@ -746,6 +770,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         setVoiceUsers((prev) =>
           prev.map((u) => u.id === user.id ? { ...u, hasScreen: true } : u)
         )
+        broadcastMediaState({ screenSharing: true })
         await renegotiateAllPeers()
       } catch (err) {
         console.error('Failed to share screen:', err)
@@ -821,7 +846,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
                   }
                 }} autoPlay playsInline muted />
               ) : remoteScreen ? (
-                <video autoPlay playsInline ref={(el) => { if (el && el.srcObject !== remoteScreen) el.srcObject = remoteScreen }} />
+                <video autoPlay playsInline muted ref={(el) => { if (el && el.srcObject !== remoteScreen) el.srcObject = remoteScreen }} />
               ) : null}
             </div>
             <div className="voice-tile-overlay">
@@ -850,7 +875,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
                   }
                 }} autoPlay playsInline muted />
               ) : remoteScreen ? (
-                <video autoPlay playsInline ref={(el) => { if (el && el.srcObject !== remoteScreen) el.srcObject = remoteScreen }} />
+                <video autoPlay playsInline muted ref={(el) => { if (el && el.srcObject !== remoteScreen) el.srcObject = remoteScreen }} />
               ) : null}
             </div>
             <div className="voice-tile-pip">
@@ -862,7 +887,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
                   }
                 }} autoPlay playsInline muted />
               ) : remoteStream ? (
-                <video autoPlay playsInline ref={(el) => { if (el && el.srcObject !== remoteStream) el.srcObject = remoteStream }} />
+                <video autoPlay playsInline muted ref={(el) => { if (el && el.srcObject !== remoteStream) el.srcObject = remoteStream }} />
               ) : null}
             </div>
             <div className="voice-tile-overlay">
@@ -883,7 +908,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
                   }
                 }} autoPlay playsInline muted />
               ) : remoteStream ? (
-                <video autoPlay playsInline ref={(el) => { if (el && el.srcObject !== remoteStream) el.srcObject = remoteStream }} />
+                <video autoPlay playsInline muted ref={(el) => { if (el && el.srcObject !== remoteStream) el.srcObject = remoteStream }} />
               ) : null}
             </div>
             <div className="voice-tile-overlay">
@@ -903,7 +928,8 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
               {tile.isSelf && <span className="voice-tile-tag"> (you)</span>}
             </span>
             <div className="voice-tile-badges">
-              {muted && tile.isSelf && <span className="voice-tile-badge muted" title="Muted">🔇</span>}
+              {(tile.isSelf ? muted : voiceUsers.find(u => u.id === tile.userId)?.muted) && <span className="voice-tile-badge muted" title="Muted">🔇</span>}
+              {(tile.isSelf ? deafened : voiceUsers.find(u => u.id === tile.userId)?.deafened) && <span className="voice-tile-badge deafened" title="Deafened">🔈</span>}
             </div>
           </>
         )}

@@ -113,6 +113,8 @@ func handleMessage(c *Client, raw []byte) {
 		handleVoiceKick(c, msg.Payload)
 	case "voice_speaking":
 		handleVoiceSpeaking(c, msg.Payload)
+	case "voice_media_state":
+		handleVoiceMediaState(c, msg.Payload)
 	case "key_request":
 		handleKeyRequest(c, msg.Payload)
 	default:
@@ -484,7 +486,34 @@ func handleVoiceSpeaking(c *Client, payload json.RawMessage) {
 		})),
 	}
 	data := mustMarshal(msg)
-	c.hub.SendToChannel(p.ChannelID, data, c.userID)
+	c.hub.SendToChannel(p.ChannelID, data, "")
+}
+
+func handleVoiceMediaState(c *Client, payload json.RawMessage) {
+	var p struct {
+		ChannelID    string `json:"channel_id"`
+		Muted        bool   `json:"muted"`
+		Deafened     bool   `json:"deafened"`
+		VideoOn      bool   `json:"video_on"`
+		ScreenSharing bool  `json:"screen_sharing"`
+	}
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return
+	}
+
+	msg := WSMessage{
+		Type: "voice_media_state",
+		Payload: json.RawMessage(mustMarshal(map[string]interface{}{
+			"channel_id":     p.ChannelID,
+			"user_id":        c.userID,
+			"muted":          p.Muted,
+			"deafened":        p.Deafened,
+			"video_on":       p.VideoOn,
+			"screen_sharing": p.ScreenSharing,
+		})),
+	}
+	data := mustMarshal(msg)
+	c.hub.SendToChannel(p.ChannelID, data, "")
 }
 
 // HandleDisconnect cleans up voice state when a user disconnects.

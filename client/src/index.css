@@ -557,6 +557,15 @@ html, body, #root {
   white-space: nowrap;
 }
 
+.voice-channel-user-icons {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+  font-size: 0.65rem;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
 /* Channel admin controls */
 .channel-category-row {
   display: flex;
@@ -868,20 +877,22 @@ html, body, #root {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  line-height: 1;
+  line-height: 1.2;
   text-align: center;
 }
 
 .user-popover-btn span:first-child {
   font-size: 1rem;
-  line-height: 1;
-  display: inline-flex;
+  width: 1.2em;
+  height: 1.2em;
+  display: flex;
   align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .user-popover-btn span:last-child {
-  line-height: 1;
-  display: inline-flex;
+  display: flex;
   align-items: center;
 }
 
@@ -955,6 +966,13 @@ html, body, #root {
   color: white;
   font-size: 0.75rem;
   cursor: pointer;
+}
+
+.pending-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-left: auto;
 }
 
 .add-friend-btn {
