@@ -90,11 +90,9 @@ export const removeFriend = (friendshipId: string) =>
 // Servers
 export const createServer = (name: string) => request<Server>('POST', '/servers', { name })
 export const getServers = () => request<Server[]>('GET', '/servers')
-export const getServer = (id: string) => request<Server>('GET', `/servers/${encodeURIComponent(id)}`)
 export const updateServer = (id: string, data: Partial<Pick<Server, 'name' | 'icon_url'>>) =>
   request<Server>('PUT', `/servers/${encodeURIComponent(id)}`, data)
 export const deleteServer = (id: string) => request<void>('DELETE', `/servers/${encodeURIComponent(id)}`)
-export const joinServer = (id: string) => request<void>('POST', `/servers/${encodeURIComponent(id)}/join`)
 export const leaveServer = (id: string) => request<void>('POST', `/servers/${encodeURIComponent(id)}/leave`)
 export const getMembers = (id: string) => request<ServerMember[]>('GET', `/servers/${encodeURIComponent(id)}/members`)
 export const getOnlineUsers = (id: string) => request<string[]>('GET', `/servers/${encodeURIComponent(id)}/online`)
