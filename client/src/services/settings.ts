@@ -42,6 +42,7 @@ export function getSettings(): MediaSettings {
 
 export function saveSettings(s: MediaSettings) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
+  window.dispatchEvent(new CustomEvent('media-settings-changed'))
 }
 
 export async function getDevices() {

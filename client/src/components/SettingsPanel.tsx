@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getSettings, saveSettings, getDevices, type MediaSettings, THEME_PRESETS, getThemeId, saveThemeId, applyTheme } from '../services/settings'
 import { useAuth } from '../context/AuthContext'
 import * as api from '../services/api'
@@ -32,6 +32,10 @@ export default function SettingsPanel({ onClose }: Props) {
   const [profileSaved, setProfileSaved] = useState(false)
   const [tab, setTab] = useState<'profile' | 'media' | 'theme'>('profile')
   const [activeTheme, setActiveTheme] = useState(getThemeId)
+  const [micTestStream, setMicTestStream] = useState<MediaStream | null>(null)
+  const [micLevel, setMicLevel] = useState(0)
+  const micTestCtxRef = useRef<AudioContext | null>(null)
+  const micTestAnimRef = useRef<number>(0)
 
   // Only load devices when media tab is opened
   useEffect(() => {
@@ -50,6 +54,76 @@ export default function SettingsPanel({ onClose }: Props) {
   useEffect(() => {
     return () => { cameraStream?.getTracks().forEach((t) => t.stop()) }
   }, [cameraStream])
+
+  // Stop mic test on unmount or tab change
+  useEffect(() => {
+    return () => {
+      micTestStream?.getTracks().forEach((t) => t.stop())
+      cancelAnimationFrame(micTestAnimRef.current)
+      micTestCtxRef.current?.close()
+    }
+  }, [micTestStream])
+
+  const toggleMicTest = async () => {
+    if (micTestStream) {
+      micTestStream.getTracks().forEach((t) => t.stop())
+      cancelAnimationFrame(micTestAnimRef.current)
+      micTestCtxRef.current?.close()
+      micTestCtxRef.current = null
+      setMicTestStream(null)
+      setMicLevel(0)
+      return
+    }
+    try {
+      const constraints: MediaStreamConstraints = {
+        audio: {
+          noiseSuppression: settings.noiseSuppression,
+          echoCancellation: settings.echoCancellation,
+          autoGainControl: settings.autoGainControl,
+          channelCount: settings.channelCount,
+          ...(settings.audioInputDevice ? { deviceId: { exact: settings.audioInputDevice } } : {}),
+        },
+      }
+      const stream = await navigator.mediaDevices.getUserMedia(constraints)
+      setMicTestStream(stream)
+
+      // Set up loopback audio playback
+      const ctx = new AudioContext()
+      micTestCtxRef.current = ctx
+      const source = ctx.createMediaStreamSource(stream)
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 512
+      analyser.smoothingTimeConstant = 0.4
+      source.connect(analyser)
+
+      // Noise gate for loopback
+      const gain = ctx.createGain()
+      gain.gain.value = 1
+      source.connect(gain)
+      gain.connect(ctx.destination)
+
+      // Level meter animation loop
+      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+      const check = () => {
+        analyser.getByteFrequencyData(dataArray)
+        let sum = 0
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i]!
+        const avg = sum / dataArray.length
+        setMicLevel(avg)
+
+        // Apply noise gate if enabled
+        if (settings.noiseGateEnabled) {
+          const speaking = avg > settings.noiseGateThreshold
+          gain.gain.setTargetAtTime(speaking ? 1 : 0, ctx.currentTime, 0.01)
+        }
+
+        micTestAnimRef.current = requestAnimationFrame(check)
+      }
+      check()
+    } catch {
+      /* mic not available */
+    }
+  }
 
   const toggleCameraPreview = async () => {
     if (cameraStream) {
@@ -318,6 +392,16 @@ export default function SettingsPanel({ onClose }: Props) {
                   <span className="slider-value">{settings.noiseGateThreshold}</span>
                 </label>
               )}
+
+              <div className="mic-level-meter">
+                <div className="mic-level-bar" style={{ width: `${Math.min(micLevel, 100)}%` }} />
+                {settings.noiseGateEnabled && (
+                  <div className="mic-level-threshold" style={{ left: `${settings.noiseGateThreshold}%` }} />
+                )}
+              </div>
+              <button className="settings-preview-btn" onClick={toggleMicTest}>
+                {micTestStream ? '⏹ Stop Mic Test' : '🎤 Test Microphone'}
+              </button>
 
               <h3 className="settings-section">Camera</h3>
               <select

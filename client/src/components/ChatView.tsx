@@ -21,6 +21,55 @@ interface Props {
 const URL_REGEX = /https?:\/\/[^\s<]+/g
 const IMAGE_EXT = /\.(jpg|jpeg|png|gif|webp)(\?.*)?$/i
 
+const EMOJI_MAP: Record<string, string> = {
+  smile: '😄', smiley: '😃', grin: '😁', grinning: '😀', laugh: '😆', sweat_smile: '😅',
+  joy: '😂', rofl: '🤣', wink: '😉', blush: '😊', innocent: '😇', heart_eyes: '😍',
+  kissing_heart: '😘', kiss: '😗', yum: '😋', stuck_out_tongue: '😛', stuck_out_tongue_winking_eye: '😜',
+  zany: '🤪', thinking: '🤔', shushing: '🤫', hand_over_mouth: '🤭', zipper_mouth: '🤐',
+  raised_eyebrow: '🤨', neutral: '😐', expressionless: '😑', no_mouth: '😶', smirk: '😏',
+  unamused: '😒', rolling_eyes: '🙄', grimace: '😬', lying: '🤥', relieved: '😌',
+  pensive: '😔', sleepy: '😪', drool: '🤤', sleeping: '😴', mask: '😷', thermometer: '🤒',
+  head_bandage: '🤕', nauseated: '🤢', vomiting: '🤮', sneezing: '🤧', hot: '🥵', cold: '🥶',
+  dizzy: '😵', exploding_head: '🤯', cowboy: '🤠', partying: '🥳', sunglasses: '😎',
+  nerd: '🤓', monocle: '🧐', confused: '😕', worried: '😟', frown: '☹️', open_mouth: '😮',
+  hushed: '😯', astonished: '😲', flushed: '😳', pleading: '🥺', crying: '😢', sob: '😭',
+  scream: '😱', angry: '😠', rage: '🤬', skull: '💀', poop: '💩', clown: '🤡', ghost: '👻',
+  alien: '👽', robot: '🤖', heart: '❤️', orange_heart: '🧡', yellow_heart: '💛',
+  green_heart: '💚', blue_heart: '💙', purple_heart: '💜', black_heart: '🖤', white_heart: '🤍',
+  broken_heart: '💔', fire: '🔥', star: '⭐', sparkles: '✨', zap: '⚡', boom: '💥',
+  wave: '👋', ok_hand: '👌', pinching: '🤏', v: '✌️', crossed_fingers: '🤞', love_you: '🤟',
+  metal: '🤘', call_me: '🤙', point_up: '☝️', point_down: '👇', point_left: '👈', point_right: '👉',
+  thumbsup: '👍', thumbsdown: '👎', fist: '✊', punch: '👊', clap: '👏', raised_hands: '🙌',
+  pray: '🙏', handshake: '🤝', muscle: '💪', brain: '🧠', eyes: '👀', tongue: '👅',
+  lips: '👄', baby: '👶', man: '👨', woman: '👩', rocket: '🚀', rainbow: '🌈', sun: '☀️',
+  moon: '🌙', cloud: '☁️', umbrella: '☂️', snowflake: '❄️', christmas_tree: '🎄',
+  gift: '🎁', tada: '🎉', trophy: '🏆', medal: '🏅', soccer: '⚽', basketball: '🏀',
+  football: '🏈', baseball: '⚾', guitar: '🎸', microphone: '🎤', headphones: '🎧',
+  art: '🎨', movie: '🎬', pizza: '🍕', hamburger: '🍔', fries: '🍟', hotdog: '🌭',
+  taco: '🌮', burrito: '🌯', cookie: '🍪', cake: '🎂', icecream: '🍦', coffee: '☕',
+  beer: '🍺', wine: '🍷', cocktail: '🍸', champagne: '🍾', dog: '🐶', cat: '🐱',
+  mouse_face: '🐭', hamster: '🐹', rabbit: '🐰', fox: '🦊', bear: '🐻', panda: '🐼',
+  penguin: '🐧', chicken: '🐔', frog: '🐸', snake: '🐍', whale: '🐳', dolphin: '🐬',
+  butterfly: '🦋', bee: '🐝', bug: '🐛', crab: '🦀', shrimp: '🦐', squid: '🦑',
+  rose: '🌹', sunflower: '🌻', herb: '🌿', maple_leaf: '🍁', mushroom: '🍄',
+  earth: '🌍', volcano: '🌋', tent: '⛺', house: '🏠', office: '🏢',
+  check: '✅', x: '❌', warning: '⚠️', no_entry: '⛔', question: '❓',
+  exclamation: '❗', '100': '💯', zzz: '💤', speech: '💬', thought: '💭',
+  wave_dash: '〰️', infinity: '♾️', peace: '☮️', yin_yang: '☯️',
+  plus: '➕', minus: '➖', lock: '🔒', unlock: '🔓', key: '🔑', bell: '🔔',
+  link: '🔗', gem: '💎', bulb: '💡', bomb: '💣', knife: '🔪', pill: '💊',
+  mag: '🔍', pin: '📌', paperclip: '📎', scissors: '✂️', pencil: '✏️',
+  book: '📖', calendar: '📅', clock: '🕐', hourglass: '⏳', phone: '📱',
+  computer: '💻', keyboard: '⌨️', printer: '🖨️', mouse: '🖱️',
+  cd: '💿', floppy: '💾', camera: '📷', tv: '📺', radio: '📻',
+  pager: '📟', mailbox: '📫', package: '📦', trash: '🗑️', scroll: '📜',
+  crown: '👑', ring: '💍', money: '💰', dollar: '💵', credit_card: '💳',
+  chart: '📈', flag: '🏁', checkered_flag: '🏁', triangular_flag: '🚩',
+  crossed_swords: '⚔️', shield: '🛡️', bow: '🏹', wrench: '🔧', hammer: '🔨',
+  gear: '⚙️', chains: '⛓️', magnet: '🧲', test_tube: '🧪', dna: '🧬',
+  satellite: '🛰️', spaceship: '🛸', up: '⬆️', down: '⬇️', left: '⬅️', right: '➡️',
+}
+
 function extractUrls(text: string): string[] {
   return text.match(URL_REGEX) || []
 }
@@ -29,9 +78,9 @@ function isImageUrl(url: string): boolean {
   return IMAGE_EXT.test(url)
 }
 
-// Formatting: ||spoilers||, ***bold italic***, **bold**, *italics*, ~~strikethrough~~, `code`, @mentions
+// Formatting: ||spoilers||, ***bold italic***, **bold**, *italics*, ~~strikethrough~~, `code`, @mentions, :emote:
 function renderFormattedText(text: string, keyPrefix: string, selfUsername?: string): (string | React.ReactElement)[] {
-  const FORMAT_REGEX = /(\|\|.+?\|\||\*\*\*.+?\*\*\*|\*\*.+?\*\*|\*.+?\*|~~.+?~~|`.+?`|@\w+)/g
+  const FORMAT_REGEX = /(\|\|.+?\|\||\*\*\*.+?\*\*\*|\*\*.+?\*\*|\*.+?\*|~~.+?~~|`.+?`|@\w+|:\w+:)/g
   const parts = text.split(FORMAT_REGEX)
   return parts.map((part, i) => {
     if (part.startsWith('||') && part.endsWith('||')) {
@@ -56,6 +105,11 @@ function renderFormattedText(text: string, keyPrefix: string, selfUsername?: str
     if (part.startsWith('@') && part.length > 1) {
       const isSelf = selfUsername && part.slice(1).toLowerCase() === selfUsername.toLowerCase()
       return <span key={`${keyPrefix}-${i}`} className={`mention-highlight${isSelf ? ' mention-self' : ''}`}>@{part.slice(1)}</span>
+    }
+    if (part.startsWith(':') && part.endsWith(':') && part.length > 2) {
+      const name = part.slice(1, -1).toLowerCase()
+      const emoji = EMOJI_MAP[name]
+      if (emoji) return <span key={`${keyPrefix}-${i}`} title={`:${name}:`}>{emoji}</span>
     }
     return part
   })
@@ -209,6 +263,8 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
   const [editHistory, setEditHistory] = useState<MessageEdit[]>([])
   const [mentionUsers, setMentionUsers] = useState<User[]>([])
   const [members, setMembers] = useState<User[]>([])
+  const [emoteResults, setEmoteResults] = useState<[string, string][]>([])
+  const [acIndex, setAcIndex] = useState(0)
   const [popover, setPopover] = useState<{ userId: string; rect: DOMRect } | null>(null)
   const [encrypted, setEncrypted] = useState(false)
   const [encryptionReady, setEncryptionReady] = useState(false)
@@ -602,8 +658,20 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
         u.display_name.toLowerCase().includes(query)
       )
       setMentionUsers(filtered.slice(0, 8))
+      setEmoteResults([])
+      setAcIndex(0)
     } else {
       setMentionUsers([])
+      // Detect :emote pattern at end of input (at least 2 chars after colon)
+      const emoteMatch = value.match(/:(\w{2,})$/)
+      if (emoteMatch) {
+        const q = (emoteMatch[1] ?? '').toLowerCase()
+        const matches = Object.entries(EMOJI_MAP).filter(([k]) => k.includes(q)).slice(0, 8)
+        setEmoteResults(matches)
+        setAcIndex(0)
+      } else {
+        setEmoteResults([])
+      }
     }
     if (value) {
       sendTypingStart(channel.id)
@@ -619,6 +687,15 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     const newInput = input.replace(/@(\w*)$/, `@${u.username} `)
     setInput(newInput)
     setMentionUsers([])
+    setAcIndex(0)
+    inputRef.current?.focus()
+  }
+
+  const insertEmote = (emoji: string) => {
+    const newInput = input.replace(/:(\w*)$/, emoji)
+    setInput(newInput)
+    setEmoteResults([])
+    setAcIndex(0)
     inputRef.current?.focus()
   }
 
@@ -1159,10 +1236,20 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
         )}
         {mentionUsers.length > 0 && (
           <div className="mention-dropdown">
-            {mentionUsers.map((u) => (
-              <div key={u.id} className="mention-item" onMouseDown={(e) => { e.preventDefault(); insertMention(u) }}>
+            {mentionUsers.map((u, i) => (
+              <div key={u.id} className={`mention-item${i === acIndex ? ' mention-item-active' : ''}`} onMouseDown={(e) => { e.preventDefault(); insertMention(u) }} onMouseEnter={() => setAcIndex(i)}>
                 <span className="mention-item-name">{u.display_name}</span>
                 <span className="mention-item-handle">@{u.username}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {emoteResults.length > 0 && (
+          <div className="mention-dropdown">
+            {emoteResults.map(([name, emoji], i) => (
+              <div key={name} className={`mention-item${i === acIndex ? ' mention-item-active' : ''}`} onMouseDown={(e) => { e.preventDefault(); insertEmote(emoji) }} onMouseEnter={() => setAcIndex(i)}>
+                <span className="mention-item-name">{emoji}</span>
+                <span className="mention-item-handle">:{name}:</span>
               </div>
             ))}
           </div>
@@ -1185,6 +1272,36 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
             rows={1}
             className="message-textarea"
             onKeyDown={e => {
+              // Autocomplete navigation (mentions & emotes)
+              const acOpen = mentionUsers.length > 0 || emoteResults.length > 0
+              const acLen = mentionUsers.length || emoteResults.length
+              if (acOpen) {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault()
+                  setAcIndex((i) => (i + 1) % acLen)
+                  return
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  setAcIndex((i) => (i - 1 + acLen) % acLen)
+                  return
+                }
+                if (e.key === 'Tab' || e.key === 'Enter') {
+                  e.preventDefault()
+                  if (mentionUsers.length > 0) {
+                    insertMention(mentionUsers[acIndex]!)
+                  } else if (emoteResults.length > 0) {
+                    insertEmote(emoteResults[acIndex]![1])
+                  }
+                  return
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault()
+                  setMentionUsers([])
+                  setEmoteResults([])
+                  return
+                }
+              }
               if (e.key === 'Escape') {
                 if (replyingTo) {
                   e.preventDefault()

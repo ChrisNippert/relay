@@ -9,9 +9,22 @@ interface Props {
   onSelectChannel: (channel: Channel) => void
   onStartCall?: (userId: string, video: boolean) => void
   onUnfriend?: (userId: string) => void
+  onArchiveDM?: (channelId: string) => void
 }
 
-export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, onUnfriend }: Props) {
+const ARCHIVED_DMS_KEY = 'relay_archived_dms'
+function getArchivedDMs(): Set<string> {
+  try {
+    const raw = localStorage.getItem(ARCHIVED_DMS_KEY)
+    if (raw) return new Set(JSON.parse(raw))
+  } catch { /* ignore */ }
+  return new Set()
+}
+function saveArchivedDMs(ids: Set<string>) {
+  localStorage.setItem(ARCHIVED_DMS_KEY, JSON.stringify([...ids]))
+}
+
+export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, onUnfriend, onArchiveDM }: Props) {
   const { user } = useAuth()
   const [friends, setFriends] = useState<Friendship[]>([])
   const [friendUsers, setFriendUsers] = useState<Map<string, User>>(new Map())
@@ -23,6 +36,8 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, 
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState('')
   const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set())
+  const [archivedDMs, setArchivedDMs] = useState<Set<string>>(() => getArchivedDMs())
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; friendshipId: string; userId: string; displayName: string } | null>(null)
 
   const loadFriends = () => {
     api.getFriends().then(async (fs) => {
@@ -138,9 +153,33 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, 
     try {
       await api.removeFriend(friendshipId)
       setFriends((prev) => prev.filter((f) => f.id !== friendshipId))
+      // Archive the DM channel when unfriending
+      const dmCh = dmByUser.get(friendUserId)
+      if (dmCh) {
+        setArchivedDMs((prev) => {
+          const next = new Set(prev)
+          next.add(dmCh.id)
+          saveArchivedDMs(next)
+          return next
+        })
+        onArchiveDM?.(dmCh.id)
+      }
       onUnfriend?.(friendUserId)
     } catch (err) {
       console.error('Failed to remove friend:', err)
+    }
+  }
+
+  const handleArchiveDM = (userId: string) => {
+    const dmCh = dmByUser.get(userId)
+    if (dmCh) {
+      setArchivedDMs((prev) => {
+        const next = new Set(prev)
+        next.add(dmCh.id)
+        saveArchivedDMs(next)
+        return next
+      })
+      onArchiveDM?.(dmCh.id)
     }
   }
 
@@ -195,11 +234,27 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, 
             const otherId = f.user_id === user?.id ? f.friend_id : f.user_id
             const u = friendUsers.get(otherId)
             const hasDM = dmByUser.has(otherId)
+            const dmCh = dmByUser.get(otherId)
+            const isArchived = dmCh ? archivedDMs.has(dmCh.id) : false
             return (
-              <div key={f.id} className="friend-item">
+              <div key={f.id} className={`friend-item${isArchived ? ' archived' : ''}`} onContextMenu={(e) => {
+                e.preventDefault()
+                setCtxMenu({ x: e.clientX, y: e.clientY, friendshipId: f.id, userId: otherId, displayName: u?.display_name ?? otherId })
+              }}>
                 <button
                   className={`channel-item ${hasDM ? 'has-dm' : ''}`}
-                  onClick={() => handleOpenDM(otherId)}
+                  onClick={() => {
+                    // Unarchive if archived when clicking
+                    if (isArchived && dmCh) {
+                      setArchivedDMs((prev) => {
+                        const next = new Set(prev)
+                        next.delete(dmCh.id)
+                        saveArchivedDMs(next)
+                        return next
+                      })
+                    }
+                    handleOpenDM(otherId)
+                  }}
                 >
                   <span className={`friend-status ${onlineUsers.has(otherId) ? 'online' : 'offline'}`}>●</span>
                   {u?.display_name ?? otherId}
@@ -286,6 +341,41 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, 
             )
           })}
         </>
+      )}
+
+      {/* Right-click context menu */}
+      {ctxMenu && (
+        <div className="voice-context-menu-overlay" onClick={() => setCtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null) }}>
+          <div className="voice-context-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
+            <div className="voice-context-menu-header">{ctxMenu.displayName}</div>
+            <button className="voice-context-menu-item" onClick={() => { handleOpenDM(ctxMenu.userId); setCtxMenu(null) }}>
+              💬 Message
+            </button>
+            {onStartCall && (
+              <>
+                <button className="voice-context-menu-item" onClick={() => { onStartCall(ctxMenu.userId, false); setCtxMenu(null) }}>
+                  📞 Voice Call
+                </button>
+                <button className="voice-context-menu-item" onClick={() => { onStartCall(ctxMenu.userId, true); setCtxMenu(null) }}>
+                  📹 Video Call
+                </button>
+              </>
+            )}
+            {dmByUser.has(ctxMenu.userId) && (
+              <button className="voice-context-menu-item" onClick={() => { handleArchiveDM(ctxMenu.userId); setCtxMenu(null) }}>
+                📦 Archive Chat
+              </button>
+            )}
+            <button className="voice-context-menu-item kick" onClick={() => {
+              if (confirm(`Remove ${ctxMenu.displayName} as a friend?`)) {
+                handleUnfriend(ctxMenu.friendshipId, ctxMenu.userId)
+              }
+              setCtxMenu(null)
+            }}>
+              ✕ Unfriend
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -568,14 +568,22 @@ html, body, #root {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--success);
+  background: var(--text-muted);
   flex-shrink: 0;
-  transition: box-shadow 0.15s, background 0.15s;
+  transition: width 0.15s, height 0.15s, box-shadow 0.15s, background 0.15s;
 }
 
 .voice-channel-user-dot.speaking {
+  width: 10px;
+  height: 10px;
   background: #43b581;
-  box-shadow: 0 0 4px 2px rgba(67, 181, 129, 0.6);
+  box-shadow: 0 0 6px 3px rgba(67, 181, 129, 0.7);
+  animation: sidebarSpeakPulse 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes sidebarSpeakPulse {
+  from { box-shadow: 0 0 4px 2px rgba(67, 181, 129, 0.5); }
+  to { box-shadow: 0 0 8px 4px rgba(67, 181, 129, 0.9); }
 }
 
 .voice-channel-user-name {
@@ -912,15 +920,17 @@ html, body, #root {
   font-size: 1rem;
   width: 1.2em;
   height: 1.2em;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  line-height: 1;
 }
 
 .user-popover-btn span:last-child {
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  line-height: 1;
 }
 
 .user-popover-btn:hover {
@@ -1776,8 +1786,14 @@ html, body, #root {
 }
 
 .voice-tile.speaking {
-  border-color: var(--success);
-  box-shadow: 0 0 16px rgba(78, 205, 196, 0.2);
+  border-color: #43b581;
+  box-shadow: 0 0 20px rgba(67, 181, 129, 0.35), inset 0 0 12px rgba(67, 181, 129, 0.08);
+  animation: tileSpeakGlow 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes tileSpeakGlow {
+  from { box-shadow: 0 0 16px rgba(67, 181, 129, 0.25), inset 0 0 8px rgba(67, 181, 129, 0.05); }
+  to { box-shadow: 0 0 24px rgba(67, 181, 129, 0.45), inset 0 0 16px rgba(67, 181, 129, 0.1); }
 }
 
 .voice-tile.is-self {
@@ -1822,8 +1838,8 @@ html, body, #root {
 }
 
 .voice-tile-avatar.speaking {
-  border-color: var(--success);
-  box-shadow: 0 0 12px rgba(78, 205, 196, 0.5);
+  border-color: #43b581;
+  box-shadow: 0 0 16px rgba(67, 181, 129, 0.6);
   animation: speakPulse 0.6s ease-in-out infinite alternate;
 }
 
@@ -2324,6 +2340,14 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 2px;
+}
+
+.friend-item.archived {
+  opacity: 0.5;
+}
+
+.friend-item.archived:hover {
+  opacity: 0.8;
 }
 
 .friend-item .channel-item {
@@ -3352,6 +3376,9 @@ html, body, #root {
 .mention-item:hover {
   background: var(--bg-hover, #2a2a3e);
 }
+.mention-item-active {
+  background: var(--bg-hover, #2a2a3e);
+}
 .mention-item-name {
   font-weight: 600;
   color: var(--text-primary);
@@ -3712,6 +3739,29 @@ html, body, #root {
 }
 .settings-preview-btn:hover {
   background: var(--bg-tertiary);
+}
+
+.mic-level-meter {
+  position: relative;
+  height: 10px;
+  background: var(--bg-tertiary);
+  border-radius: 5px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+.mic-level-bar {
+  height: 100%;
+  background: var(--success);
+  border-radius: 5px;
+  transition: width 0.05s linear;
+}
+.mic-level-threshold {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--danger);
+  pointer-events: none;
 }
 
 .settings-camera-preview {
