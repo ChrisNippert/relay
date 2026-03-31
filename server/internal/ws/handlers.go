@@ -491,11 +491,11 @@ func handleVoiceSpeaking(c *Client, payload json.RawMessage) {
 
 func handleVoiceMediaState(c *Client, payload json.RawMessage) {
 	var p struct {
-		ChannelID    string `json:"channel_id"`
-		Muted        bool   `json:"muted"`
-		Deafened     bool   `json:"deafened"`
-		VideoOn      bool   `json:"video_on"`
-		ScreenSharing bool  `json:"screen_sharing"`
+		ChannelID     string `json:"channel_id"`
+		Muted         bool   `json:"muted"`
+		Deafened      bool   `json:"deafened"`
+		VideoOn       bool   `json:"video_on"`
+		ScreenSharing bool   `json:"screen_sharing"`
 	}
 	if err := json.Unmarshal(payload, &p); err != nil {
 		return
@@ -507,7 +507,7 @@ func handleVoiceMediaState(c *Client, payload json.RawMessage) {
 			"channel_id":     p.ChannelID,
 			"user_id":        c.userID,
 			"muted":          p.Muted,
-			"deafened":        p.Deafened,
+			"deafened":       p.Deafened,
 			"video_on":       p.VideoOn,
 			"screen_sharing": p.ScreenSharing,
 		})),
