@@ -46,7 +46,8 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
   const [videoOn, setVideoOn] = useState(false)
   const [screenSharing, setScreenSharing] = useState(false)
   const [connecting, setConnecting] = useState(false)
-  const [members, setMembers] = useState<Map<string, string>>(new Map())
+  const [, setMembers] = useState<Map<string, string>>(new Map())
+  const membersRef = useRef<Map<string, string>>(new Map())
   const [, setChannelVoiceUsers] = useState<string[]>([])
   const [, setLocalSpeaking] = useState(false)
   const [focusedUser, setFocusedUser] = useState<string | null>(null)
@@ -80,7 +81,12 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
             names.set(m.user_id, u.display_name)
           } catch { /* skip */ }
         }
+        membersRef.current = names
         setMembers(names)
+        // Update any existing voice users whose names were showing UIDs
+        setVoiceUsers((prev) =>
+          prev.map((u) => u.isSelf ? u : { ...u, displayName: names.get(u.id) ?? u.displayName })
+        )
       }).catch(console.error)
     } else {
       // DM channel — resolve participants
@@ -92,7 +98,12 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
             names.set(id, u.display_name)
           } catch { /* skip */ }
         }
+        membersRef.current = names
         setMembers(names)
+        // Update any existing voice users whose names were showing UIDs
+        setVoiceUsers((prev) =>
+          prev.map((u) => u.isSelf ? u : { ...u, displayName: names.get(u.id) ?? u.displayName })
+        )
       }).catch(console.error)
     }
   }, [channel.server_id, channel.id])
@@ -178,7 +189,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     }
   }, [autoJoin])
 
-  const getName = useCallback((userId: string) => members.get(userId) ?? userId.slice(0, 8), [members])
+  const getName = useCallback((userId: string) => membersRef.current.get(userId) ?? userId.slice(0, 8), [])
 
   // Fullscreen change listener
   useEffect(() => {
@@ -391,6 +402,18 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     const answer = await pc.handleOffer(offer)
     sendCallAnswer(fromUserId, channel.id, answer)
     playCallRing()
+
+    // If we have video or screen share, the initial answer may not include them.
+    // Renegotiate so the new peer receives our extra tracks.
+    const hasExtraTracks = (localStreamRef.current?.getVideoTracks().length ?? 0) > 0 || screenStreamRef.current
+    if (hasExtraTracks) {
+      setTimeout(async () => {
+        try {
+          const reoffer = await pc.createOffer()
+          sendCallRenegotiate(fromUserId, channel.id, reoffer)
+        } catch { /* ignore */ }
+      }, 500)
+    }
   }
 
   async function handleIncomingAnswer(fromUserId: string, answer: RTCSessionDescriptionInit) {
@@ -436,11 +459,13 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     const isPrimary = stream.id === primaryStreamIds.current.get(userId)
 
     if (isPrimary) {
-      const hasVideoTrack = stream.getVideoTracks().length > 0
-      if (hasVideoTrack) {
+      const liveVideoTracks = stream.getVideoTracks().filter(t => t.readyState === 'live')
+      if (liveVideoTracks.length > 0) {
+        // Create a new MediaStream wrapper so React detects a new object for srcObject
+        const videoStream = new MediaStream([...liveVideoTracks, ...stream.getAudioTracks()])
         setRemoteStreams((prev) => {
           const next = new Map(prev)
-          next.set(userId, stream)
+          next.set(userId, videoStream)
           return next
         })
         setVoiceUsers((prev) =>
@@ -448,7 +473,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         )
 
         // Detect when remote video tracks end (camera turned off) to remove freeze frame
-        stream.getVideoTracks().forEach(t => {
+        liveVideoTracks.forEach(t => {
           t.addEventListener('ended', () => {
             setRemoteStreams((prev) => {
               const next = new Map(prev)
@@ -582,6 +607,11 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       localStreamRef.current?.getVideoTracks().forEach((t) => {
         t.stop()
         localStreamRef.current?.removeTrack(t)
+        // Remove senders from all peer connections so remote tracks properly end
+        for (const pc of peersRef.current.values()) {
+          const sender = pc.pc.getSenders().find(s => s.track === t)
+          if (sender) pc.pc.removeTrack(sender)
+        }
       })
       if (localVideoRef.current) localVideoRef.current.srcObject = null
       setVideoOn(false)

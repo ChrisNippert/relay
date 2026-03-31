@@ -6,8 +6,24 @@ export interface CallOptions {
   screen: boolean
 }
 
-const ICE_SERVERS: RTCConfiguration = {
+const DEFAULT_ICE_CONFIG: RTCConfiguration = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+}
+
+let cachedICEConfig: RTCConfiguration | null = null
+
+export function setICEConfig(servers: { urls: string[]; username?: string; credential?: string }[]) {
+  cachedICEConfig = {
+    iceServers: servers.map(s => ({
+      urls: s.urls,
+      username: s.username,
+      credential: s.credential,
+    })),
+  }
+}
+
+function getICEConfig(): RTCConfiguration {
+  return cachedICEConfig ?? DEFAULT_ICE_CONFIG
 }
 
 export class PeerConnection {
@@ -17,7 +33,7 @@ export class PeerConnection {
   onRemoteStream: ((stream: MediaStream) => void) | null = null
 
   constructor() {
-    this.pc = new RTCPeerConnection(ICE_SERVERS)
+    this.pc = new RTCPeerConnection(getICEConfig())
 
     this.pc.onicecandidate = (ev) => {
       if (ev.candidate) {

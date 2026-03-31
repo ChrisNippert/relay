@@ -2,31 +2,79 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import type { User } from '../types'
 import * as api from '../services/api'
 import { connect, disconnect } from '../services/ws'
-import { generateKeyPair, publicKeyFromPrivate } from '../services/crypto'
+import { generateKeyPair, publicKeyFromPrivate, generateSigningKeyPair } from '../services/crypto'
 
 const PRIVKEY_STORAGE = 'relay_e2e_privkey'
+const SIGNING_PRIVKEY_STORAGE = 'relay_e2e_signing_privkey'
+const DEVICE_ID_STORAGE = 'relay_device_id'
+
+let ensureKeyPairRunning = false
 
 async function ensureKeyPair() {
-  const existing = localStorage.getItem(PRIVKEY_STORAGE)
-  if (existing) {
-    // Have a local private key — derive its public key and verify it matches the server
-    const me = await api.getMe()
-    const localPub = await publicKeyFromPrivate(existing)
-    if (me.public_key === localPub) return // keys are in sync
-    // Mismatch or server has no key — re-upload the public key derived from our local private key
-    await api.updatePublicKey(localPub)
-    return
+  if (ensureKeyPairRunning) return
+  ensureKeyPairRunning = true
+  try {
+    await doEnsureKeyPair()
+  } finally {
+    ensureKeyPairRunning = false
   }
-  // No local key (new device) — generate fresh keypair
-  const kp = await generateKeyPair()
-  localStorage.setItem(PRIVKEY_STORAGE, kp.privateKey)
-  await api.updatePublicKey(kp.publicKey)
-  // Invalidate old channel key entries (encrypted for previous keypair)
-  await api.deleteMyChannelKeys().catch(() => {})
+}
+
+async function doEnsureKeyPair() {
+  const existing = localStorage.getItem(PRIVKEY_STORAGE)
+  const existingDeviceId = localStorage.getItem(DEVICE_ID_STORAGE)
+
+  // Derive public key from existing private key, or generate a new keypair
+  const kp = existing
+    ? { privateKey: existing, publicKey: await publicKeyFromPrivate(existing) }
+    : await generateKeyPair()
+  if (!existing) {
+    localStorage.setItem(PRIVKEY_STORAGE, kp.privateKey)
+  }
+
+  // Signing key pair (ECDSA P-256)
+  const existingSigning = localStorage.getItem(SIGNING_PRIVKEY_STORAGE)
+  let signingPub = ''
+  if (!existingSigning) {
+    const skp = await generateSigningKeyPair()
+    localStorage.setItem(SIGNING_PRIVKEY_STORAGE, skp.signingPrivateKey)
+    signingPub = skp.signingPublicKey
+  }
+
+  try {
+    const devices = await api.getMyDevices()
+
+    // If we have a stored device_id that matches, we're in sync
+    if (existingDeviceId) {
+      const match = devices.find(d => d.id === existingDeviceId && d.public_key === kp.publicKey)
+      if (match) return
+    }
+
+    // Check if any existing device already has this public key (e.g. duplicate registration)
+    const sameKey = devices.find(d => d.public_key === kp.publicKey)
+    if (sameKey) {
+      localStorage.setItem(DEVICE_ID_STORAGE, sameKey.id)
+      return
+    }
+  } catch {}
+
+  // Register a new device (include signing key)
+  const device = await api.registerDevice(kp.publicKey, '', signingPub)
+  localStorage.setItem(DEVICE_ID_STORAGE, device.id)
+  // Also sync public_key on user record for backward compat
+  await api.updatePublicKey(kp.publicKey).catch(() => {})
 }
 
 export function getPrivateKey(): string | null {
   return localStorage.getItem(PRIVKEY_STORAGE)
+}
+
+export function getSigningPrivateKey(): string | null {
+  return localStorage.getItem(SIGNING_PRIVKEY_STORAGE)
+}
+
+export function getDeviceId(): string | null {
+  return localStorage.getItem(DEVICE_ID_STORAGE)
 }
 
 interface AuthCtx {

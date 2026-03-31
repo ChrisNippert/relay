@@ -59,6 +59,7 @@ export interface Message {
   reply_to?: Message
   edited: boolean
   deleted?: boolean
+  key_epoch: number
   created_at: string
   updated_at: string
   attachments?: Attachment[]
@@ -84,8 +85,18 @@ export interface Attachment {
 
 export interface ChannelKey {
   channel_id: string
-  user_id: string
+  device_id: string
+  epoch: number
   encrypted_key: string
+}
+
+export interface Device {
+  id: string
+  user_id: string
+  name: string
+  public_key: string
+  signing_key: string
+  created_at: string
 }
 
 // WebSocket message envelope

@@ -1,4 +1,4 @@
-import type { AuthResponse, Channel, ChannelKey, Friendship, Message, Server, ServerInvite, ServerMember, User } from '../types'
+import type { AuthResponse, Channel, ChannelKey, Device, Friendship, Message, Server, ServerInvite, ServerMember, User } from '../types'
 
 let serverUrl: string = localStorage.getItem('relay_server_url') || ''
 
@@ -146,12 +146,30 @@ export const getEditHistory = (messageId: string) =>
 // Channel keys (E2E)
 export const getChannelKeys = (channelId: string) =>
   request<ChannelKey[]>('GET', `/channels/${encodeURIComponent(channelId)}/keys`)
-export const setChannelKey = (channelId: string, encrypted_key: string, user_id?: string) =>
-  request<void>('POST', `/channels/${encodeURIComponent(channelId)}/keys`, { encrypted_key, ...(user_id ? { user_id } : {}) })
+export const setChannelKey = (channelId: string, encrypted_key: string, device_id: string, epoch: number) =>
+  request<void>('POST', `/channels/${encodeURIComponent(channelId)}/keys`, { encrypted_key, device_id, epoch })
 export const deleteChannelKeys = (channelId: string) =>
   request<void>('DELETE', `/channels/${encodeURIComponent(channelId)}/keys`)
 export const deleteMyChannelKeys = () =>
   request<void>('DELETE', '/users/me/channel-keys')
+
+// Channel devices (E2E — all devices of channel members)
+export const getChannelDevices = (channelId: string) =>
+  request<Device[]>('GET', `/channels/${encodeURIComponent(channelId)}/devices`)
+
+// Channel epoch (E2E — current key epoch)
+export const getChannelEpoch = (channelId: string) =>
+  request<{ epoch: number }>('GET', `/channels/${encodeURIComponent(channelId)}/epoch`)
+
+// Devices (per-device E2E keys)
+export const registerDevice = (public_key: string, name = '', signing_key = '') =>
+  request<Device>('POST', '/devices', { public_key, name, signing_key })
+export const getMyDevices = () =>
+  request<Device[]>('GET', '/devices')
+export const deleteDevice = (deviceId: string) =>
+  request<void>('DELETE', `/devices/${encodeURIComponent(deviceId)}`)
+export const getUserDevices = (userId: string) =>
+  request<Device[]>('GET', `/users/${encodeURIComponent(userId)}/devices`)
 
 // File upload
 const MAX_UPLOAD_MB = 50
@@ -212,6 +230,16 @@ export const fileURL = (fileId: string) => {
 // Voice state
 export const getVoiceUsers = (channelId: string) =>
   request<string[]>('GET', `/channels/${encodeURIComponent(channelId)}/voice-users`)
+
+// ICE servers for WebRTC
+export interface ICEServerConfig {
+  urls: string[]
+  username?: string
+  credential?: string
+}
+
+export const getICEServers = () =>
+  request<ICEServerConfig[]>('GET', '/ice-servers')
 
 // OpenGraph metadata
 export interface OGData {

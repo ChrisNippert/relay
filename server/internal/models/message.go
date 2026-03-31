@@ -13,6 +13,7 @@ type Message struct {
 	ReplyTo     *Message      `json:"reply_to,omitempty"`
 	Edited      bool          `json:"edited"`
 	Deleted     bool          `json:"deleted"`
+	KeyEpoch    int           `json:"key_epoch"`
 	CreatedAt   time.Time     `json:"created_at"`
 	UpdatedAt   time.Time     `json:"updated_at"`
 	Attachments []Attachment  `json:"attachments,omitempty"`
@@ -39,6 +40,7 @@ type Attachment struct {
 
 type ChannelKey struct {
 	ChannelID    string `json:"channel_id"`
-	UserID       string `json:"user_id"`
+	DeviceID     string `json:"device_id"`
+	Epoch        int    `json:"epoch"`
 	EncryptedKey string `json:"encrypted_key"`
 }

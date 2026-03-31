@@ -111,9 +111,42 @@ func handleMessage(c *Client, raw []byte) {
 		handleVoiceLeave(c, msg.Payload)
 	case "voice_kick":
 		handleVoiceKick(c, msg.Payload)
+	case "key_request":
+		handleKeyRequest(c, msg.Payload)
 	default:
 		log.Printf("Unknown WebSocket message type: %s", msg.Type)
 	}
+}
+
+type keyRequestPayload struct {
+	ChannelID string `json:"channel_id"`
+}
+
+func handleKeyRequest(c *Client, payload json.RawMessage) {
+	var p keyRequestPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return
+	}
+	if p.ChannelID == "" {
+		return
+	}
+
+	// Verify the requester is a participant
+	hasAccess, err := c.hub.db.IsChannelParticipant(p.ChannelID, c.userID)
+	if err != nil || !hasAccess {
+		return
+	}
+
+	// Broadcast key_request to other channel members so whoever has the key can redistribute
+	msg := WSMessage{
+		Type: "key_request",
+		Payload: json.RawMessage(mustMarshal(map[string]string{
+			"channel_id": p.ChannelID,
+			"user_id":    c.userID,
+		})),
+	}
+	data := mustMarshal(msg)
+	c.hub.SendToChannel(p.ChannelID, data, c.userID)
 }
 
 type chatMessagePayload struct {
@@ -121,6 +154,7 @@ type chatMessagePayload struct {
 	Content       string   `json:"content"`
 	Nonce         string   `json:"nonce"`
 	Type          string   `json:"type"`
+	KeyEpoch      int      `json:"key_epoch"`
 	AttachmentIDs []string `json:"attachment_ids"`
 	ReplyToID     *string  `json:"reply_to_id,omitempty"`
 }
@@ -150,7 +184,7 @@ func handleChatMessage(c *Client, payload json.RawMessage) {
 	if p.Content == "" {
 		p.Content = " "
 	}
-	msg, err := c.hub.db.CreateMessage(msgID, p.ChannelID, c.userID, p.Content, p.Nonce, p.Type, p.ReplyToID)
+	msg, err := c.hub.db.CreateMessage(msgID, p.ChannelID, c.userID, p.Content, p.Nonce, p.Type, p.ReplyToID, p.KeyEpoch)
 	if err != nil {
 		log.Printf("Failed to create message: %v", err)
 		return

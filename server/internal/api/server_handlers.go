@@ -160,6 +160,13 @@ func LeaveServerHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
 			return
 		}
 
+		// Purge channel keys for the departing member (forward secrecy)
+		if chs, err := database.GetChannelsByServer(serverID); err == nil {
+			for _, ch := range chs {
+				database.DeleteChannelKeysForUserOnChannel(ch.ID, userID)
+			}
+		}
+
 		// Broadcast member_left to all remaining server members
 		broadcastChannelEvent(hub, serverID, "member_left", map[string]string{
 			"server_id": serverID,
@@ -298,6 +305,13 @@ func KickMemberHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
 		if err := database.RemoveServerMember(serverID, targetUserID); err != nil {
 			http.Error(w, `{"error":"failed to kick member"}`, http.StatusInternalServerError)
 			return
+		}
+
+		// Purge channel keys for the kicked member (forward secrecy)
+		if chs, err := database.GetChannelsByServer(serverID); err == nil {
+			for _, ch := range chs {
+				database.DeleteChannelKeysForUserOnChannel(ch.ID, targetUserID)
+			}
 		}
 
 		// Broadcast kick event

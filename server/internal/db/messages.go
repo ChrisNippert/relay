@@ -7,10 +7,10 @@ import (
 	"github.com/relay-chat/relay/internal/models"
 )
 
-func (db *DB) CreateMessage(id, channelID, userID, content, nonce, msgType string, replyToID *string) (*models.Message, error) {
+func (db *DB) CreateMessage(id, channelID, userID, content, nonce, msgType string, replyToID *string, keyEpoch int) (*models.Message, error) {
 	_, err := db.Exec(
-		`INSERT INTO messages (id, channel_id, user_id, content, nonce, type, reply_to_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, channelID, userID, content, nonce, msgType, replyToID,
+		`INSERT INTO messages (id, channel_id, user_id, content, nonce, type, reply_to_id, key_epoch) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, channelID, userID, content, nonce, msgType, replyToID, keyEpoch,
 	)
 	if err != nil {
 		return nil, err
@@ -22,9 +22,9 @@ func (db *DB) GetMessage(id string) (*models.Message, error) {
 	m := &models.Message{}
 	var replyToID sql.NullString
 	err := db.QueryRow(
-		`SELECT id, channel_id, user_id, content, nonce, type, reply_to_id, edited, deleted, created_at, updated_at FROM messages WHERE id = ?`,
+		`SELECT id, channel_id, user_id, content, nonce, type, reply_to_id, edited, deleted, COALESCE(key_epoch, 0), created_at, updated_at FROM messages WHERE id = ?`,
 		id,
-	).Scan(&m.ID, &m.ChannelID, &m.UserID, &m.Content, &m.Nonce, &m.Type, &replyToID, &m.Edited, &m.Deleted, &m.CreatedAt, &m.UpdatedAt)
+	).Scan(&m.ID, &m.ChannelID, &m.UserID, &m.Content, &m.Nonce, &m.Type, &replyToID, &m.Edited, &m.Deleted, &m.KeyEpoch, &m.CreatedAt, &m.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +120,7 @@ func (db *DB) GetMessageEditHistory(messageID string) ([]models.MessageEdit, err
 
 func (db *DB) GetMessages(channelID string, limit, offset int) ([]models.Message, error) {
 	rows, err := db.Query(
-		`SELECT m.id, m.channel_id, m.user_id, m.content, m.nonce, m.type, m.reply_to_id, m.edited, m.deleted, m.created_at, m.updated_at,
+		`SELECT m.id, m.channel_id, m.user_id, m.content, m.nonce, m.type, m.reply_to_id, m.edited, m.deleted, COALESCE(m.key_epoch, 0), m.created_at, m.updated_at,
 		        u.username, u.display_name, u.avatar_url, u.name_color
 		 FROM messages m
 		 JOIN users u ON m.user_id = u.id
@@ -140,7 +140,7 @@ func (db *DB) GetMessages(channelID string, limit, offset int) ([]models.Message
 		var username, displayName, avatarURL, nameColor string
 		var replyToID sql.NullString
 		if err := rows.Scan(&m.ID, &m.ChannelID, &m.UserID, &m.Content, &m.Nonce, &m.Type,
-			&replyToID, &m.Edited, &m.Deleted, &m.CreatedAt, &m.UpdatedAt, &username, &displayName, &avatarURL, &nameColor); err != nil {
+			&replyToID, &m.Edited, &m.Deleted, &m.KeyEpoch, &m.CreatedAt, &m.UpdatedAt, &username, &displayName, &avatarURL, &nameColor); err != nil {
 			return nil, err
 		}
 		if replyToID.Valid {
@@ -171,7 +171,7 @@ func (db *DB) GetMessages(channelID string, limit, offset int) ([]models.Message
 
 func (db *DB) SearchMessages(channelID, query string, limit int) ([]models.Message, error) {
 	rows, err := db.Query(
-		`SELECT m.id, m.channel_id, m.user_id, m.content, m.nonce, m.type, m.reply_to_id, m.edited, m.deleted, m.created_at, m.updated_at,
+		`SELECT m.id, m.channel_id, m.user_id, m.content, m.nonce, m.type, m.reply_to_id, m.edited, m.deleted, COALESCE(m.key_epoch, 0), m.created_at, m.updated_at,
 		        u.username, u.display_name, u.avatar_url, u.name_color
 		 FROM messages m
 		 JOIN users u ON m.user_id = u.id
@@ -191,7 +191,7 @@ func (db *DB) SearchMessages(channelID, query string, limit int) ([]models.Messa
 		var username, displayName, avatarURL, nameColor string
 		var replyToID sql.NullString
 		if err := rows.Scan(&m.ID, &m.ChannelID, &m.UserID, &m.Content, &m.Nonce, &m.Type,
-			&replyToID, &m.Edited, &m.Deleted, &m.CreatedAt, &m.UpdatedAt, &username, &displayName, &avatarURL, &nameColor); err != nil {
+			&replyToID, &m.Edited, &m.Deleted, &m.KeyEpoch, &m.CreatedAt, &m.UpdatedAt, &username, &displayName, &avatarURL, &nameColor); err != nil {
 			return nil, err
 		}
 		if replyToID.Valid {

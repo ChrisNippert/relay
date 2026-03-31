@@ -4,6 +4,8 @@ import * as api from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import { subscribe } from '../services/ws'
 import { playMessageSound, playCallRing } from '../services/sounds'
+import * as e2e from '../services/e2e'
+import { setICEConfig } from '../services/webrtc'
 import ServerList from '../components/ServerList'
 import ChannelList from '../components/ChannelList'
 import type { VoicePresenceUser } from '../components/ChannelList'
@@ -91,10 +93,61 @@ export default function Home() {
     return unsub
   }, [user?.id, dmCall, activeVoiceChannel?.id])
 
+  // Global handler: when another device requests an encryption key, rotate to a new epoch.
+  // This preserves forward secrecy — new users get only the new key, not old epoch keys.
+  // Debounced per-channel to prevent multiple clients all rotating at once.
+  useEffect(() => {
+    const recentRotations = new Map<string, number>()
+    const COOLDOWN = 15000 // 15s cooldown per channel
+    const unsub = subscribe((msg: WSMsg) => {
+      if (msg.type === 'key_request') {
+        const p = msg.payload as { channel_id: string; user_id: string }
+        if (!p.channel_id) return
+        // Skip if we already rotated this channel recently
+        const lastRotation = recentRotations.get(p.channel_id) ?? 0
+        if (Date.now() - lastRotation < COOLDOWN) return
+        // Only respond if we have the key for this channel
+        e2e.getChannelKey(p.channel_id).then((key) => {
+          if (key) {
+            // Double-check cooldown (async gap)
+            const last = recentRotations.get(p.channel_id) ?? 0
+            if (Date.now() - last < COOLDOWN) return
+            recentRotations.set(p.channel_id, Date.now())
+            console.log('%c[E2E]', 'color: #00e0ff; font-weight: bold', `Global key_request: rotating keys for channel ${p.channel_id.slice(0,8)}\u2026`)
+            e2e.rotateKeys(p.channel_id)
+          }
+        }).catch(() => {})
+      } else if (msg.type === 'member_joined' || msg.type === 'member_left' || msg.type === 'member_kicked') {
+        // Rotate keys for ALL encrypted channels in the server when membership changes.
+        // This ensures forward secrecy even when nobody is viewing the encrypted channel.
+        const p = msg.payload as { server_id: string; user_id: string }
+        if (!p.server_id) return
+        api.getChannels(p.server_id).then(async (chs) => {
+          for (const ch of chs) {
+            if (ch.type === 'voice') continue
+            const lastRotation = recentRotations.get(ch.id) ?? 0
+            if (Date.now() - lastRotation < COOLDOWN) continue
+            const isEnc = await e2e.isChannelEncrypted(ch.id)
+            if (!isEnc) continue
+            const key = await e2e.getChannelKey(ch.id)
+            if (!key) continue
+            const last = recentRotations.get(ch.id) ?? 0
+            if (Date.now() - last < COOLDOWN) continue
+            recentRotations.set(ch.id, Date.now())
+            console.log('%c[E2E]', 'color: #00e0ff; font-weight: bold', `Global member change: rotating keys for channel ${ch.id.slice(0,8)}\u2026`)
+            await e2e.rotateKeys(ch.id)
+          }
+        }).catch(() => {})
+      }
+    })
+    return unsub
+  }, [])
+
   // Load servers on mount
   useEffect(() => {
     api.getServers().then(setServers).catch(console.error)
     api.getDMs().then(setDmChannels).catch(console.error)
+    api.getICEServers().then(setICEConfig).catch(console.error)
   }, [])
 
   // Track voice presence for sidebar display
@@ -462,6 +515,7 @@ export default function Home() {
         {activeVoiceChannel && (
           <div className="voice-channel-wrapper" style={{ display: isViewingActiveVoice ? 'flex' : 'none' }}>
             <VoiceChannel
+              key={activeVoiceChannel.id}
               ref={voiceRef}
               channel={activeVoiceChannel}
               autoJoin

@@ -132,6 +132,15 @@ func JoinByInviteHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
 		// Increment use count
 		database.UseInvite(code)
 
+		// Purge any pre-existing channel keys for this user on the server's channels.
+		// This enforces forward secrecy: the new member cannot decrypt messages from
+		// before they joined, even if keys were pre-distributed by an old client.
+		if chs, err := database.GetChannelsByServer(invite.ServerID); err == nil {
+			for _, ch := range chs {
+				database.DeleteChannelKeysForUserOnChannel(ch.ID, userID)
+			}
+		}
+
 		server, err := database.GetServer(invite.ServerID)
 		if err != nil {
 			http.Error(w, `{"error":"server not found"}`, http.StatusNotFound)

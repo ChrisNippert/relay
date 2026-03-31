@@ -44,11 +44,53 @@ func (db *DB) migrate() error {
 		`ALTER TABLE users ADD COLUMN custom_status TEXT DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN name_color TEXT DEFAULT ''`,
 		`ALTER TABLE channels ADD COLUMN description TEXT DEFAULT ''`,
+		// Device-based E2E: create devices table and migrate channel_keys
+		`CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT DEFAULT '', public_key TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`,
+		`CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id)`,
+		// Recreate channel_keys with device_id if it still uses user_id
+		`CREATE TABLE IF NOT EXISTS channel_keys_new (channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE, device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE, epoch INTEGER NOT NULL DEFAULT 0, encrypted_key TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (channel_id, device_id, epoch))`,
+		`ALTER TABLE messages ADD COLUMN key_epoch INTEGER DEFAULT 0`,
+		`ALTER TABLE devices ADD COLUMN signing_key TEXT DEFAULT ''`,
+		// Migrate channel_keys to add epoch column if missing
+		`ALTER TABLE channel_keys ADD COLUMN epoch INTEGER DEFAULT 0`,
 	}
 	for _, stmt := range alterations {
 		db.Exec(stmt) // intentionally ignore "duplicate column" errors
 	}
+	// Migrate channel_keys if it still uses user_id (old schema)
+	db.migrateChannelKeys()
 	return nil
+}
+
+// migrateChannelKeys replaces the old user_id-based channel_keys with device_id-based.
+func (db *DB) migrateChannelKeys() {
+	// Check if old table has user_id column (pragma returns column info)
+	rows, err := db.Query(`PRAGMA table_info(channel_keys)`)
+	if err != nil {
+		return
+	}
+	hasUserID := false
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var dfltValue *string
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err == nil {
+			if name == "user_id" {
+				hasUserID = true
+			}
+		}
+	}
+	rows.Close()
+
+	if !hasUserID {
+		return // already migrated or fresh DB
+	}
+
+	// Old channel_keys used user_id; drop it and replace with new schema
+	db.Exec(`DROP TABLE IF EXISTS channel_keys`)
+	db.Exec(`ALTER TABLE channel_keys_new RENAME TO channel_keys`)
 }
 
 const schema = `
@@ -142,12 +184,23 @@ CREATE TABLE IF NOT EXISTS attachments (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS devices (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT DEFAULT '',
+    public_key TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_devices_user ON devices(user_id);
+
 CREATE TABLE IF NOT EXISTS channel_keys (
     channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-    user_id TEXT NOT NULL REFERENCES users(id),
+    device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    epoch INTEGER NOT NULL DEFAULT 0,
     encrypted_key TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (channel_id, user_id)
+    PRIMARY KEY (channel_id, device_id, epoch)
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, created_at);

@@ -12,17 +12,24 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type ICEServer struct {
+	URLs       []string `yaml:"urls" json:"urls"`
+	Username   string   `yaml:"username,omitempty" json:"username,omitempty"`
+	Credential string   `yaml:"credential,omitempty" json:"credential,omitempty"`
+}
+
 type Config struct {
-	Host           string   `yaml:"host"`
-	Port           string   `yaml:"port"`
-	DatabasePath   string   `yaml:"database_path"`
-	JWTSecret      string   `yaml:"jwt_secret"`
-	UploadDir      string   `yaml:"upload_dir"`
-	MaxUploadMB    int      `yaml:"max_upload_mb"`
-	TLSCert        string   `yaml:"tls_cert"`
-	TLSKey         string   `yaml:"tls_key"`
-	StaticDir      string   `yaml:"static_dir"`
-	AllowedOrigins []string `yaml:"allowed_origins"`
+	Host           string      `yaml:"host"`
+	Port           string      `yaml:"port"`
+	DatabasePath   string      `yaml:"database_path"`
+	JWTSecret      string      `yaml:"jwt_secret"`
+	UploadDir      string      `yaml:"upload_dir"`
+	MaxUploadMB    int         `yaml:"max_upload_mb"`
+	TLSCert        string      `yaml:"tls_cert"`
+	TLSKey         string      `yaml:"tls_key"`
+	StaticDir      string      `yaml:"static_dir"`
+	AllowedOrigins []string    `yaml:"allowed_origins"`
+	ICEServers     []ICEServer `yaml:"ice_servers"`
 }
 
 var insecureDefaults = []string{

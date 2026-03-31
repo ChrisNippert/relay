@@ -171,26 +171,26 @@ export default function UserPopover({ userId, anchorRect, onClose, onMessage, se
           {!isSelf && (
             <div className="user-popover-actions">
               <button className="user-popover-btn message" onClick={handleMessage}>
-                💬 Message
+                <span>💬</span><span>Message</span>
               </button>
               {friendStatus === 'none' && (
                 <button className="user-popover-btn add" onClick={handleAddFriend}>
-                  ➕ Add Friend
+                  <span>➕</span><span>Add Friend</span>
                 </button>
               )}
               {friendStatus === 'pending-sent' && (
                 <button className="user-popover-btn pending" disabled>
-                  ⏳ Request Sent
+                  <span>⏳</span><span>Request Sent</span>
                 </button>
               )}
               {friendStatus === 'pending-received' && (
                 <button className="user-popover-btn accept" onClick={handleAcceptFriend}>
-                  ✅ Accept Request
+                  <span>✅</span><span>Accept Request</span>
                 </button>
               )}
               {friendStatus === 'accepted' && (
                 <button className="user-popover-btn friends" disabled>
-                  ✓ Friends
+                  <span>✓</span><span>Friends</span>
                 </button>
               )}
               {isAdmin && serverId && currentRole && (

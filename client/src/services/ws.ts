@@ -84,8 +84,8 @@ export function subscribe(handler: MessageHandler): () => void {
 }
 
 // Convenience senders
-export function sendChatMessage(channelId: string, content: string, nonce?: string, attachmentIds?: string[], replyToId?: string) {
-  send('chat_message', { channel_id: channelId, content, nonce, type: 'text', attachment_ids: attachmentIds, reply_to_id: replyToId })
+export function sendChatMessage(channelId: string, content: string, nonce?: string, attachmentIds?: string[], replyToId?: string, keyEpoch?: number) {
+  send('chat_message', { channel_id: channelId, content, nonce, type: 'text', attachment_ids: attachmentIds, reply_to_id: replyToId, key_epoch: keyEpoch ?? 0 })
 }
 
 export function sendEditMessage(messageId: string, content: string) {

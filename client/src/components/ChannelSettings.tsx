@@ -64,10 +64,11 @@ export default function ChannelSettings({ channel, onClose, onChannelUpdated, on
     if (encryptInput !== encryptCode) return
     setEncrypting(true)
     try {
-      const ok = await e2e.enableEncryption(channel.id, channel.server_id || undefined)
+      const ok = await e2e.enableEncryption(channel.id)
       if (ok) {
         setEncrypted(true)
         setShowEncryptConfirm(false)
+        window.dispatchEvent(new CustomEvent('channel-encryption-enabled', { detail: { channelId: channel.id } }))
       }
     } catch (err) {
       console.error('Failed to enable encryption:', err)

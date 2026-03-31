@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback, type FormEvent, type ChangeEv
 import type { Channel, Message, MessageEdit, User, ServerMember, WSMessage as WSMsg } from '../types'
 import * as api from '../services/api'
 import hljs from 'highlight.js'
-import { sendChatMessage, sendTypingStart, sendTypingStop, sendEditMessage, sendDeleteMessage, subscribe } from '../services/ws'
+import { sendChatMessage, sendTypingStart, sendTypingStop, sendEditMessage, sendDeleteMessage, subscribe, send } from '../services/ws'
 import { useAuth } from '../context/AuthContext'
 import UserPopover from './UserPopover'
 import * as e2e from '../services/e2e'
@@ -29,14 +29,17 @@ function isImageUrl(url: string): boolean {
   return IMAGE_EXT.test(url)
 }
 
-// Formatting: ||spoilers||, *italics*, **bold**, ~~strikethrough~~, `code`
+// Formatting: ||spoilers||, ***bold italic***, **bold**, *italics*, ~~strikethrough~~, `code`, @mentions
 function renderFormattedText(text: string, keyPrefix: string): (string | React.ReactElement)[] {
-  const FORMAT_REGEX = /(\|\|.+?\|\||\*\*.+?\*\*|\*.+?\*|~~.+?~~|`.+?`)/g
+  const FORMAT_REGEX = /(\|\|.+?\|\||\*\*\*.+?\*\*\*|\*\*.+?\*\*|\*.+?\*|~~.+?~~|`.+?`|@\w+)/g
   const parts = text.split(FORMAT_REGEX)
   return parts.map((part, i) => {
     if (part.startsWith('||') && part.endsWith('||')) {
       const inner = part.slice(2, -2)
       return <span key={`${keyPrefix}-${i}`} className="spoiler" onClick={(e) => (e.currentTarget.classList.toggle('revealed'))}>{inner}</span>
+    }
+    if (part.startsWith('***') && part.endsWith('***') && part.length > 6) {
+      return <strong key={`${keyPrefix}-${i}`}><em>{part.slice(3, -3)}</em></strong>
     }
     if (part.startsWith('**') && part.endsWith('**')) {
       return <strong key={`${keyPrefix}-${i}`}>{part.slice(2, -2)}</strong>
@@ -49,6 +52,9 @@ function renderFormattedText(text: string, keyPrefix: string): (string | React.R
     }
     if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
       return <code key={`${keyPrefix}-${i}`} className="inline-code">{part.slice(1, -1)}</code>
+    }
+    if (part.startsWith('@') && part.length > 1) {
+      return <span key={`${keyPrefix}-${i}`} className="mention-highlight">@{part.slice(1)}</span>
     }
     return part
   })
@@ -240,21 +246,101 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     }
   }, [channel.id, channel.server_id, user?.id])
 
+  // Track whether we've already sent a key_request for this channel
+  const keyRequestSentRef = useRef(false)
+
   // Check if channel has E2E encryption enabled
-  useEffect(() => {
-    setEncrypted(false)
-    setEncryptionReady(false)
-    e2e.isChannelEncrypted(channel.id).then(async (enc) => {
+  const checkEncryption = useCallback(async () => {
+    try {
+      const enc = await e2e.isChannelEncrypted(channel.id)
       setEncrypted(enc)
       if (enc) {
-        // Check if we actually have (or can get) the channel key
         const key = await e2e.getChannelKey(channel.id)
         setEncryptionReady(key !== null)
-        // Redistribute keys to any members missing them
-        e2e.redistributeKeys(channel.id, channel.server_id || undefined)
+        console.log('%c[E2E]', 'color: #00e0ff; font-weight: bold', `Channel ${channel.id.slice(0,8)}… encrypted=${enc} keyReady=${key !== null}`)
+        if (key) {
+          // We have the key — redistribute to our other devices only
+          e2e.redistributeKeys(channel.id)
+        } else if (!keyRequestSentRef.current) {
+          // No key for this device — ask other channel members to rotate (only once)
+          keyRequestSentRef.current = true
+          send('key_request', { channel_id: channel.id })
+        }
+        return key !== null
+      } else {
+        setEncryptionReady(false)
+        return true // not encrypted, no key needed
       }
-    }).catch(() => setEncrypted(false))
-  }, [channel.id, channel.server_id])
+    } catch {
+      setEncrypted(false)
+      return true
+    }
+  }, [channel.id])
+
+  useEffect(() => {
+    let cancelled = false
+    setEncrypted(false)
+    setEncryptionReady(false)
+    keyRequestSentRef.current = false // reset on channel change
+
+    // Retry key check — another client may not have distributed the key yet
+    const tryCheck = async (attempt: number) => {
+      if (cancelled) return
+      const ready = await checkEncryption()
+      if (!ready && !cancelled && attempt < 5) {
+        setTimeout(() => tryCheck(attempt + 1), 2000 * attempt)
+      }
+    }
+    tryCheck(1)
+    return () => { cancelled = true }
+  }, [channel.id, channel.server_id, checkEncryption])
+
+  // When the encryption key becomes available, re-decrypt any messages
+  // that were loaded before the key was distributed to this device.
+  useEffect(() => {
+    if (!encryptionReady) return
+    let cancelled = false
+    // Fetch raw encrypted content from server, re-decrypt locally
+    api.getMessages(channel.id, 50, 0).then(async (rawMsgs) => {
+      if (cancelled) return
+      const rawMap = new Map(rawMsgs.map((m) => [m.id, m]))
+      setMessages((prev) => {
+        if (!prev.some((m) => m.content.includes('[encrypted'))) return prev
+        // Start async re-decryption then replace in-place
+        const redecrypt = async () => {
+          const updated = await Promise.all(
+            prev.map(async (m) => {
+              if (!m.content.includes('[encrypted')) return m
+              const raw = rawMap.get(m.id)
+              if (!raw || !e2e.isEncryptedContent(raw.content)) return m
+              const plain = await e2e.decryptMessage(channel.id, raw.content, raw.key_epoch)
+              return { ...m, content: plain }
+            })
+          )
+          if (!cancelled) {
+            // Replace messages in-place without duplicating
+            setMessages((current) => {
+              const updatedMap = new Map(updated.map(m => [m.id, m]))
+              return current.map(m => updatedMap.get(m.id) ?? m)
+            })
+          }
+        }
+        redecrypt()
+        return prev
+      })
+    }).catch(console.error)
+    return () => { cancelled = true }
+  }, [encryptionReady, channel.id])
+
+  // Re-check encryption when it's enabled from ChannelSettings
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (detail?.channelId === channel.id) checkEncryption()
+    }
+    window.addEventListener('channel-encryption-enabled', handler)
+    return () => window.removeEventListener('channel-encryption-enabled', handler)
+  }, [channel.id, checkEncryption])
 
   // Load channel members for @mention autocomplete
   useEffect(() => {
@@ -293,6 +379,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
 
   // Load messages on channel change
   useEffect(() => {
+    let stale = false
     setMessages([])
     seenMsgIds.current.clear()
     setHasMore(true)
@@ -304,20 +391,22 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     setInitialScrollDone(false)
     initialLoadRef.current = true
     api.getMessages(channel.id).then(async (msgs) => {
+      if (stale) return
       const ordered = msgs.reverse()
       // Decrypt any E2E-encrypted messages
       const decrypted = await Promise.all(
         ordered.map(async (m) => {
           seenMsgIds.current.add(m.id)
           if (e2e.isEncryptedContent(m.content)) {
-            const plain = await e2e.decryptMessage(channel.id, m.content)
+            const plain = await e2e.decryptMessage(channel.id, m.content, m.key_epoch)
             return { ...m, content: plain }
           }
           return m
         })
       )
-      setMessages(decrypted)
+      if (!stale) setMessages(decrypted)
     }).catch(console.error)
+    return () => { stale = true }
   }, [channel.id])
 
   // Subscribe to WebSocket messages
@@ -333,7 +422,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
           const handleMsg = async () => {
             let decrypted = m
             if (e2e.isEncryptedContent(m.content)) {
-              const plain = await e2e.decryptMessage(channel.id, m.content)
+              const plain = await e2e.decryptMessage(channel.id, m.content, m.key_epoch)
               decrypted = { ...m, content: plain }
             }
             setMessages((prev) => prev.some((x) => x.id === decrypted.id) ? prev : [...prev, decrypted])
@@ -373,15 +462,30 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
           })
         }
       } else if (msg.type === 'member_joined' || msg.type === 'member_left' || msg.type === 'member_kicked') {
-        // Rotate E2E keys when membership changes so new/departed members
-        // cannot decrypt messages from before/after the change
+        // Membership changed — rotation is handled globally in Home.tsx.
+        // Just re-check our encryption state in case keys were rotated.
         if (encrypted && channel.server_id) {
           const p = msg.payload as { server_id: string }
           if (p.server_id === channel.server_id) {
-            e2e.rotateKeys(channel.id, channel.server_id).then((ok) => {
-              if (ok) setEncryptionReady(true)
+            e2e.clearChannelKey(channel.id)
+            e2e.getChannelKey(channel.id).then((key) => {
+              if (key) setEncryptionReady(true)
             })
           }
+        }
+      } else if (msg.type === 'channel_keys_updated') {
+        // Another client distributed a key for this channel — fetch key directly
+        // (don't call checkEncryption to avoid sending another key_request)
+        const p = msg.payload as { channel_id: string; epoch: number }
+        if (p.channel_id === channel.id) {
+          console.log('%c[E2E]', 'color: #00e0ff; font-weight: bold', `Key update notification: channel=${channel.id.slice(0,8)}… epoch=${p.epoch}`)
+          e2e.clearChannelKey(channel.id)
+          e2e.getChannelKey(channel.id).then((key) => {
+            if (key) {
+              setEncryptionReady(true)
+              setEncrypted(true)
+            }
+          }).catch(() => {})
         }
       }
     })
@@ -430,14 +534,19 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
             const ordered = older.reverse()
             const decrypted = await Promise.all(
               ordered.map(async (m) => {
+                seenMsgIds.current.add(m.id)
                 if (e2e.isEncryptedContent(m.content)) {
-                  const plain = await e2e.decryptMessage(channel.id, m.content)
+                  const plain = await e2e.decryptMessage(channel.id, m.content, m.key_epoch)
                   return { ...m, content: plain }
                 }
                 return m
               })
             )
-            setMessages((prev) => [...decrypted, ...prev])
+            setMessages((prev) => {
+              const existingIds = new Set(prev.map(p => p.id))
+              const newMsgs = decrypted.filter(m => !existingIds.has(m.id))
+              return [...newMsgs, ...prev]
+            })
             // Preserve scroll position after prepending
             requestAnimationFrame(() => {
               list.scrollTop = list.scrollHeight - prevHeight
@@ -457,7 +566,17 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     setSearchLoading(true)
     try {
       const results = await api.searchMessages(channel.id, searchQuery.trim())
-      setSearchResults(results.reverse())
+      // Decrypt any encrypted results
+      const decrypted = await Promise.all(
+        results.map(async (m) => {
+          if (e2e.isEncryptedContent(m.content)) {
+            const plain = await e2e.decryptMessage(channel.id, m.content, m.key_epoch)
+            return { ...m, content: plain }
+          }
+          return m
+        })
+      )
+      setSearchResults(decrypted.reverse())
     } catch {
       setSearchResults([])
     }
@@ -503,7 +622,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
 
   const handleSend = async (e: FormEvent) => {
     e.preventDefault()
-    const text = input.trim()
+    let text = input.trim()
     if (!text && pendingFiles.length === 0) return
 
     // Wait for any still-uploading files
@@ -513,26 +632,50 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     const attachmentIds = pendingFiles.filter(f => f.id).map(f => f.id!)
     setPendingFiles([])
     setUploading(false)
+    pendingCountRef.current = 0
 
     // Don't send if there's no text and no successful uploads
     if (!text && attachmentIds.length === 0) return
 
+    // If text exceeds limit, convert to a message.txt file attachment
+    const TEXT_LIMIT = 5000
+    if (text.length > TEXT_LIMIT) {
+      try {
+        const blob = new Blob([text], { type: 'text/plain' })
+        const file = new File([blob], 'message.txt', { type: 'text/plain' })
+        const res = await api.uploadFile(file, () => {})
+        attachmentIds.push(res.id)
+        text = text.slice(0, 200) + '… *(full message attached as message.txt)*'
+      } catch {
+        alert('Failed to upload long message as file.')
+        return
+      }
+    }
+
     // Encrypt if E2E is enabled for this channel
     let content = text || ' '
+    let keyEpoch = 0
     if (encrypted) {
       if (!encryptionReady) {
-        alert('Encryption key not available. You cannot send messages on this encrypted channel until a member with the key comes online.')
-        return
+        // No key yet — rotate to a new epoch so this device can participate
+        const rotated = await e2e.rotateKeys(channel.id)
+        if (!rotated) {
+          alert('Failed to create encryption key. Please try again.')
+          return
+        }
+        setEncryptionReady(true)
       }
       const enc = await e2e.encryptMessage(channel.id, content)
       if (!enc) {
         alert('Failed to encrypt message. Send aborted to protect your privacy.')
         return
       }
-      content = enc
+      console.log('%c[E2E]', 'color: #00e0ff; font-weight: bold', `Sending encrypted: epoch=${enc.epoch} len=${enc.encrypted.length}`)
+      content = enc.encrypted
+      keyEpoch = enc.epoch
     }
 
-    sendChatMessage(channel.id, content, undefined, attachmentIds.length ? attachmentIds : undefined, replyingTo?.id)
+    sendChatMessage(channel.id, content, undefined, attachmentIds.length ? attachmentIds : undefined, replyingTo?.id, keyEpoch)
     setReplyingTo(null)
     setInput('')
     sendTypingStop(channel.id)
@@ -998,8 +1141,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
             value={input}
             onChange={(e) => handleInput(e.target.value)}
             onPaste={handlePaste}
-            placeholder={encrypted && !encryptionReady ? '🔓 Waiting for encryption key...' : `Message ${channel.server_id ? '#' + channel.name : (dmPartnerName || channel.name || 'this channel')}`}
-            disabled={encrypted && !encryptionReady}
+            placeholder={encrypted && !encryptionReady ? '🔓 New here — your first message will rotate the encryption key' : `Message ${channel.server_id ? '#' + channel.name : (dmPartnerName || channel.name || 'this channel')}`}
             autoFocus
             rows={1}
             className="message-textarea"

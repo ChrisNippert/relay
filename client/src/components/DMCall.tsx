@@ -246,9 +246,19 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
       localStreamRef.current?.getVideoTracks().forEach((t) => {
         t.stop()
         localStreamRef.current?.removeTrack(t)
+        // Remove senders from peer connection so remote track properly ends
+        if (pcRef.current) {
+          const sender = pcRef.current.pc.getSenders().find(s => s.track === t)
+          if (sender) pcRef.current.pc.removeTrack(sender)
+        }
       })
       if (localVideoRef.current) localVideoRef.current.srcObject = null
       setVideoOn(false)
+      // Renegotiate so remote knows video is gone
+      if (pcRef.current) {
+        const offer = await pcRef.current.createOffer()
+        sendCallRenegotiate(targetUserId, channelId, offer)
+      }
     } else {
       try {
         const settings = getSettings()

@@ -861,7 +861,9 @@ html, body, #root {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 6px;
+  line-height: 1.4;
+  text-align: center;
 }
 
 .user-popover-btn:hover {
@@ -3191,6 +3193,18 @@ html, body, #root {
 .mention-item-handle {
   color: var(--text-secondary);
   font-size: 0.8rem;
+}
+
+.mention-highlight {
+  background: rgba(88, 101, 242, 0.2);
+  color: #7289da;
+  padding: 0 2px;
+  border-radius: 3px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mention-highlight:hover {
+  background: rgba(88, 101, 242, 0.35);
 }
 
 /* ── Edit history modal ─────────────────────────────────────── */

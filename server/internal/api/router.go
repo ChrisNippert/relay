@@ -115,11 +115,22 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		// Voice state
 		r.Get("/api/channels/{channelID}/voice-users", GetVoiceUsersHandler(database, hub))
 
+		// ICE servers for WebRTC
+		r.Get("/api/ice-servers", GetICEServersHandler(cfg))
+
 		// Channel keys (E2E encryption)
 		r.Get("/api/channels/{channelID}/keys", GetChannelKeysHandler(database))
-		r.Post("/api/channels/{channelID}/keys", SetChannelKeyHandler(database))
+		r.Post("/api/channels/{channelID}/keys", SetChannelKeyHandler(database, hub))
 		r.Delete("/api/channels/{channelID}/keys", DeleteChannelKeysHandler(database))
 		r.Delete("/api/users/me/channel-keys", DeleteMyChannelKeysHandler(database))
+		r.Get("/api/channels/{channelID}/devices", GetChannelDevicesHandler(database))
+		r.Get("/api/channels/{channelID}/epoch", GetChannelEpochHandler(database))
+
+		// Devices (E2E per-device keys)
+		r.Post("/api/devices", RegisterDeviceHandler(database))
+		r.Get("/api/devices", GetMyDevicesHandler(database))
+		r.Delete("/api/devices/{deviceID}", DeleteDeviceHandler(database))
+		r.Get("/api/users/{userID}/devices", GetUserDevicesHandler(database))
 
 		// File upload
 		r.Post("/api/upload", UploadHandler(cfg, database))

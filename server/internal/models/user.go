@@ -17,6 +17,15 @@ type User struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+type Device struct {
+	ID         string    `json:"id"`
+	UserID     string    `json:"user_id"`
+	Name       string    `json:"name"`
+	PublicKey  string    `json:"public_key"`
+	SigningKey string    `json:"signing_key"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 type Friendship struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`

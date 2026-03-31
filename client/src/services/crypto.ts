@@ -118,6 +118,57 @@ export async function publicKeyFromPrivate(privateKeyJwk: string): Promise<strin
   return bufToBase64(raw)
 }
 
+// Generate an ECDSA P-256 signing key pair
+export async function generateSigningKeyPair(): Promise<{ signingPublicKey: string; signingPrivateKey: string }> {
+  const keyPair = await crypto.subtle.generateKey(
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['sign', 'verify']
+  )
+  const pubRaw = await crypto.subtle.exportKey('raw', keyPair.publicKey)
+  const privJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey)
+  return {
+    signingPublicKey: bufToBase64(pubRaw),
+    signingPrivateKey: JSON.stringify(privJwk),
+  }
+}
+
+// Sign data with ECDSA P-256
+export async function sign(privateKeyJwk: string, data: string): Promise<string> {
+  const privateKey = await crypto.subtle.importKey(
+    'jwk',
+    JSON.parse(privateKeyJwk),
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['sign']
+  )
+  const encoded = new TextEncoder().encode(data)
+  const signature = await crypto.subtle.sign(
+    { name: 'ECDSA', hash: 'SHA-256' },
+    privateKey,
+    encoded
+  )
+  return bufToBase64(signature)
+}
+
+// Verify an ECDSA P-256 signature
+export async function verify(publicKeyBase64: string, data: string, signatureBase64: string): Promise<boolean> {
+  const publicKey = await crypto.subtle.importKey(
+    'raw',
+    base64ToBuf(publicKeyBase64),
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['verify']
+  )
+  const encoded = new TextEncoder().encode(data)
+  return crypto.subtle.verify(
+    { name: 'ECDSA', hash: 'SHA-256' },
+    publicKey,
+    base64ToBuf(signatureBase64),
+    encoded
+  )
+}
+
 // Helpers
 function bufToBase64(buf: ArrayBuffer): string {
   return btoa(String.fromCharCode(...new Uint8Array(buf)))

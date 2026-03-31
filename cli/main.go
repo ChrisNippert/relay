@@ -3,27 +3,31 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"crypto/tls"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Types ───────────────────────────────────────────────────────────────────
 
 type User struct {
 	ID          string `json:"id"`
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
+	Status      string `json:"status"`
+}
+
+type AuthResponse struct {
+	Token string `json:"token"`
+	User  User   `json:"user"`
 }
 
 type Server struct {
@@ -32,503 +36,583 @@ type Server struct {
 }
 
 type Channel struct {
-	ID       string  `json:"id"`
-	Name     string  `json:"name"`
-	ServerID *string `json:"server_id"`
-	Type     string  `json:"type"`
-}
-
-type Author struct {
-	DisplayName string `json:"display_name"`
-	Username    string `json:"username"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	ServerID string `json:"server_id"`
 }
 
 type Message struct {
 	ID        string   `json:"id"`
-	ChannelID string   `json:"channel_id"`
-	UserID    string   `json:"user_id"`
 	Content   string   `json:"content"`
-	Edited    bool     `json:"edited"`
-	ReplyToID *string  `json:"reply_to_id"`
-	ReplyTo   *Message `json:"reply_to"`
+	UserID    string   `json:"user_id"`
 	CreatedAt string   `json:"created_at"`
-	Author    *Author  `json:"author"`
+	Deleted   bool     `json:"deleted"`
+	Author    *User    `json:"author"`
+	ReplyTo   *Message `json:"reply_to"`
 }
 
-type WSEnvelope struct {
+type Friendship struct {
+	ID       string `json:"id"`
+	UserID   string `json:"user_id"`
+	FriendID string `json:"friend_id"`
+	Status   string `json:"status"`
+	Friend   *User  `json:"friend"`
+}
+
+type DMChannel struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Participants []User `json:"participants"`
+}
+
+type WSMessage struct {
 	Type    string          `json:"type"`
 	Payload json.RawMessage `json:"payload"`
 }
 
-// ── Client ────────────────────────────────────────────────────────────────────
+type Member struct {
+	UserID string `json:"user_id"`
+	Role   string `json:"role"`
+	User   *User  `json:"user"`
+}
 
-type client struct {
-	base    string
+type Invite struct {
+	ID      string `json:"id"`
+	Code    string `json:"code"`
+	Uses    int    `json:"uses"`
+	MaxUses int    `json:"max_uses"`
+}
+
+// ── State ───────────────────────────────────────────────────────────────────
+
+var (
+	baseURL string
 	token   string
 	me      User
-	http    *http.Client
 	ws      *websocket.Conn
-	inbox   chan WSEnvelope
-	scanner *bufio.Scanner
-}
+	wsMu    sync.Mutex
+	reader  *bufio.Reader
 
-func newClient(base string) *client {
-	return &client{
-		base:    strings.TrimRight(base, "/"),
-		http:    &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}},
-		inbox:   make(chan WSEnvelope, 64),
-		scanner: bufio.NewScanner(os.Stdin),
-	}
-}
+	// navigation state
+	currentServer  *Server
+	currentChannel *Channel
+)
 
-// ── HTTP helpers ──────────────────────────────────────────────────────────────
+// ── HTTP helpers ────────────────────────────────────────────────────────────
 
-func (c *client) do(method, path string, body any) ([]byte, int, error) {
+func api(method, path string, body interface{}) (*http.Response, error) {
 	var r io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
 		r = bytes.NewReader(b)
 	}
-	req, err := http.NewRequest(method, c.base+"/api"+path, r)
+	req, err := http.NewRequest(method, baseURL+path, r)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	return data, resp.StatusCode, nil
+	return http.DefaultClient.Do(req)
 }
 
-func apiJSON[T any](c *client, method, path string, body any) (T, error) {
-	var zero T
-	data, code, err := c.do(method, path, body)
-	if err != nil {
-		return zero, err
-	}
-	if code >= 400 {
-		return zero, fmt.Errorf("HTTP %d: %s", code, strings.TrimSpace(string(data)))
-	}
-	var out T
-	if err := json.Unmarshal(data, &out); err != nil {
-		return zero, fmt.Errorf("decode: %w", err)
-	}
-	return out, nil
-}
-
-// ── WebSocket ─────────────────────────────────────────────────────────────────
-
-func (c *client) wsURL() string {
-	u, _ := url.Parse(c.base)
-	scheme := "wss"
-	if u.Scheme == "http" {
-		scheme = "ws"
-	}
-	return fmt.Sprintf("%s://%s/api/ws?token=%s", scheme, u.Host, url.QueryEscape(c.token))
-}
-
-func (c *client) connectWS() error {
-	dialer := websocket.Dialer{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	conn, _, err := dialer.Dial(c.wsURL(), nil)
+func apiJSON(method, path string, body interface{}, out interface{}) error {
+	resp, err := api(method, path, body)
 	if err != nil {
 		return err
 	}
-	c.ws = conn
-	go c.readPump(conn)
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(b))
+	}
+	if out != nil {
+		return json.NewDecoder(resp.Body).Decode(out)
+	}
 	return nil
 }
 
-// readPump reads from a WS connection and forwards to inbox.
-// On disconnect it drains the inbox sentinel and reconnects automatically.
-func (c *client) readPump(conn *websocket.Conn) {
-	dialer := websocket.Dialer{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
-	for {
-		_, data, err := conn.ReadMessage()
-		if err != nil {
-			// Signal disconnect to the chat loop
-			c.inbox <- WSEnvelope{Type: "__disconnect__"}
-			// Reconnect loop
-			for {
-				time.Sleep(2 * time.Second)
-				newConn, _, err2 := dialer.Dial(c.wsURL(), nil)
-				if err2 == nil {
-					c.ws = newConn
-					conn = newConn
-					c.inbox <- WSEnvelope{Type: "__reconnected__"}
-					break
-				}
-			}
-			continue
-		}
-		var env WSEnvelope
-		if json.Unmarshal(data, &env) == nil {
-			c.inbox <- env
-		}
-	}
-}
+// ── WebSocket ───────────────────────────────────────────────────────────────
 
-func (c *client) sendWS(typ string, payload any) {
-	if c.ws == nil {
+func connectWS() {
+	u := strings.Replace(baseURL, "http", "ws", 1) + "/api/ws"
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{"auth", token}
+	var err error
+	ws, _, err = dialer.Dial(u, nil)
+	if err != nil {
+		fmt.Println("WS connect error:", err)
 		return
 	}
-	data, _ := json.Marshal(map[string]any{"type": typ, "payload": payload})
-	c.ws.WriteMessage(websocket.TextMessage, data)
-}
-
-// ── Prompt helpers ────────────────────────────────────────────────────────────
-
-func (c *client) prompt(label string) string {
-	fmt.Printf("%s: ", label)
-	c.scanner.Scan()
-	return strings.TrimSpace(c.scanner.Text())
-}
-
-func (c *client) choose(label string, options []string) int {
-	for i, o := range options {
-		fmt.Printf("  [%d] %s\n", i+1, o)
-	}
-	for {
-		s := c.prompt(label)
-		n, err := strconv.Atoi(s)
-		if err == nil && n >= 1 && n <= len(options) {
-			return n - 1
+	fmt.Println("[WS connected]")
+	go func() {
+		for {
+			_, raw, err := ws.ReadMessage()
+			if err != nil {
+				fmt.Println("\n[WS disconnected]")
+				return
+			}
+			var msg WSMessage
+			if json.Unmarshal(raw, &msg) != nil {
+				continue
+			}
+			handleWS(msg)
 		}
-		fmt.Println("  Invalid choice, try again.")
+	}()
+}
+
+func handleWS(msg WSMessage) {
+	switch msg.Type {
+	case "chat_message":
+		var m Message
+		json.Unmarshal(msg.Payload, &m)
+		if m.Deleted {
+			return
+		}
+		name := m.UserID[:8]
+		if m.Author != nil {
+			name = m.Author.DisplayName
+			if name == "" {
+				name = m.Author.Username
+			}
+		}
+		// only show if in the current channel
+		if currentChannel != nil && m.ID != "" {
+			chID := ""
+			var p struct {
+				ChannelID string `json:"channel_id"`
+			}
+			json.Unmarshal(msg.Payload, &p)
+			chID = p.ChannelID
+			if chID == currentChannel.ID {
+				ts := fmtTime(m.CreatedAt)
+				fmt.Printf("\r[%s] %s: %s\n> ", ts, name, m.Content)
+			}
+		}
+	case "presence":
+		// silent
+	case "typing_start", "typing_stop":
+		// silent
 	}
 }
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
+func wsSend(typ string, payload interface{}) {
+	if ws == nil {
+		return
+	}
+	b, _ := json.Marshal(payload)
+	msg := WSMessage{Type: typ, Payload: b}
+	wsMu.Lock()
+	defer wsMu.Unlock()
+	ws.WriteJSON(msg)
+}
 
-func (c *client) login() error {
-	fmt.Println()
-	email := c.prompt("Email")
-	fmt.Printf("Password: ")
-	c.scanner.Scan()
-	password := strings.TrimSpace(c.scanner.Text())
-	r, err := apiJSON[map[string]json.RawMessage](c, "POST", "/auth/login", map[string]string{
-		"email":    email,
-		"password": password,
-	})
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+func fmtTime(s string) string {
+	t, err := time.Parse(time.RFC3339Nano, s)
 	if err != nil {
-		return fmt.Errorf("login failed: %w", err)
-	}
-	var resp struct {
-		Token string `json:"token"`
-		User  User   `json:"user"`
-	}
-	if err := json.Unmarshal(r["token"], &resp.Token); err != nil || resp.Token == "" {
-		return fmt.Errorf("login failed: bad response")
-	}
-	json.Unmarshal(r["user"], &resp.User)
-	c.token = resp.Token
-	c.me = resp.User
-	return nil
-}
-
-// ── Channel selection ─────────────────────────────────────────────────────────
-
-func (c *client) pickChannel() (Channel, error) {
-	fmt.Println("\n── Where to? ──────────────────────────────")
-	fmt.Println("  [1] Server channel")
-	fmt.Println("  [2] Direct message")
-	choice := c.prompt("Choose")
-	if choice == "2" {
-		dms, err := apiJSON[[]Channel](c, "GET", "/dm", nil)
-		if err != nil || len(dms) == 0 {
-			return Channel{}, fmt.Errorf("no DMs found")
-		}
-		names := make([]string, len(dms))
-		for i, d := range dms {
-			names[i] = d.Name
-		}
-		idx := c.choose("DM", names)
-		return dms[idx], nil
-	}
-	servers, err := apiJSON[[]Server](c, "GET", "/servers", nil)
-	if err != nil || len(servers) == 0 {
-		return Channel{}, fmt.Errorf("no servers found")
-	}
-	serverNames := make([]string, len(servers))
-	for i, s := range servers {
-		serverNames[i] = s.Name
-	}
-	fmt.Println()
-	sIdx := c.choose("Server", serverNames)
-	srv := servers[sIdx]
-	channels, err := apiJSON[[]Channel](c, "GET", "/servers/"+srv.ID+"/channels", nil)
-	if err != nil || len(channels) == 0 {
-		return Channel{}, fmt.Errorf("no channels found")
-	}
-	var textChannels []Channel
-	for _, ch := range channels {
-		if ch.Type == "text" {
-			textChannels = append(textChannels, ch)
-		}
-	}
-	if len(textChannels) == 0 {
-		return Channel{}, fmt.Errorf("no text channels")
-	}
-	chanNames := make([]string, len(textChannels))
-	for i, ch := range textChannels {
-		chanNames[i] = "#" + ch.Name
-	}
-	fmt.Println()
-	cIdx := c.choose("Channel", chanNames)
-	return textChannels[cIdx], nil
-}
-
-// ── Message display ───────────────────────────────────────────────────────────
-
-func authorName(m Message) string {
-	if m.Author != nil {
-		if m.Author.DisplayName != "" {
-			return m.Author.DisplayName
-		}
-		return m.Author.Username
-	}
-	if len(m.UserID) >= 8 {
-		return m.UserID[:8]
-	}
-	return m.UserID
-}
-
-func formatTime(iso string) string {
-	t, err := time.Parse(time.RFC3339Nano, iso)
-	if err != nil {
-		t, _ = time.Parse("2006-01-02T15:04:05Z", iso)
+		return s
 	}
 	return t.Local().Format("15:04")
 }
 
-func printMessage(m Message, idx int) {
-	edited := ""
-	if m.Edited {
-		edited = " (edited)"
-	}
-	if m.ReplyTo != nil {
-		preview := m.ReplyTo.Content
-		if len(preview) > 40 {
-			preview = preview[:40] + "…"
-		}
-		fmt.Printf("  ↩ %s: %s\n", authorName(*m.ReplyTo), preview)
-	}
-	fmt.Printf("[%d] %s  %s%s\n    %s\n", idx, authorName(m), formatTime(m.CreatedAt), edited, m.Content)
+func prompt(label string) string {
+	fmt.Print(label)
+	line, _ := reader.ReadString('\n')
+	return strings.TrimSpace(line)
 }
 
-// ── Chat loop ─────────────────────────────────────────────────────────────────
-
-func (c *client) chat(ch Channel) {
-	msgs, err := apiJSON[[]Message](c, "GET", "/channels/"+ch.ID+"/messages?limit=20", nil)
-	if err != nil {
-		fmt.Println("Could not load messages:", err)
-		msgs = nil
+func pick(label string, items []string) int {
+	for i, s := range items {
+		fmt.Printf("  %d) %s\n", i+1, s)
 	}
-	// API returns DESC; reverse to chronological
+	for {
+		s := prompt(label)
+		var n int
+		if _, err := fmt.Sscanf(s, "%d", &n); err == nil && n >= 1 && n <= len(items) {
+			return n - 1
+		}
+		fmt.Println("Invalid choice")
+	}
+}
+
+// ── Commands ────────────────────────────────────────────────────────────────
+
+func cmdServers() {
+	var servers []Server
+	if err := apiJSON("GET", "/api/servers", nil, &servers); err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	if len(servers) == 0 {
+		fmt.Println("No servers.")
+		return
+	}
+	names := make([]string, len(servers))
+	for i, s := range servers {
+		names[i] = s.Name
+	}
+	idx := pick("Select server: ", names)
+	currentServer = &servers[idx]
+	currentChannel = nil
+	fmt.Printf("Entered server: %s\n", currentServer.Name)
+}
+
+func cmdChannels() {
+	if currentServer == nil {
+		fmt.Println("Select a server first (/servers)")
+		return
+	}
+	var channels []Channel
+	if err := apiJSON("GET", "/api/servers/"+currentServer.ID+"/channels", nil, &channels); err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	if len(channels) == 0 {
+		fmt.Println("No channels.")
+		return
+	}
+	names := make([]string, len(channels))
+	for i, c := range channels {
+		tag := "T"
+		if c.Type == "voice" {
+			tag = "V"
+		}
+		names[i] = fmt.Sprintf("[%s] #%s", tag, c.Name)
+	}
+	idx := pick("Select channel: ", names)
+	currentChannel = &channels[idx]
+	fmt.Printf("Joined #%s\n", currentChannel.Name)
+	cmdHistory()
+}
+
+func cmdHistory() {
+	if currentChannel == nil {
+		fmt.Println("Select a channel first")
+		return
+	}
+	var msgs []Message
+	if err := apiJSON("GET", "/api/channels/"+currentChannel.ID+"/messages?limit=25", nil, &msgs); err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	// reverse to show oldest first
 	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
 		msgs[i], msgs[j] = msgs[j], msgs[i]
 	}
-	chanLabel := "#" + ch.Name
-	if ch.ServerID == nil {
-		chanLabel = "DM:" + ch.Name
-	}
-	fmt.Printf("\n══ %s ══════════════════════════════════════\n", chanLabel)
-	fmt.Println("Commands: /reply <N> <text>  /edit <N> <text>  /history <N>  /switch  /quit")
-	fmt.Println("          @username to mention someone")
-	fmt.Println(strings.Repeat("─", 50))
-	for i, m := range msgs {
-		printMessage(m, i+1)
-	}
-	fmt.Println(strings.Repeat("─", 50))
-
-	// Drain stale WS messages
-	for len(c.inbox) > 0 {
-		<-c.inbox
-	}
-
-	inputCh := make(chan string)
-	go func() {
-		for {
-			fmt.Printf("> ")
-			if !c.scanner.Scan() {
-				inputCh <- "/quit"
-				return
+	for _, m := range msgs {
+		if m.Deleted {
+			continue
+		}
+		name := m.UserID[:8]
+		if m.Author != nil {
+			n := m.Author.DisplayName
+			if n == "" {
+				n = m.Author.Username
 			}
-			inputCh <- strings.TrimSpace(c.scanner.Text())
+			name = n
+		}
+		ts := fmtTime(m.CreatedAt)
+		fmt.Printf("[%s] %s: %s\n", ts, name, m.Content)
+	}
+}
+
+func cmdSend(text string) {
+	if currentChannel == nil {
+		fmt.Println("Select a channel first")
+		return
+	}
+	wsSend("chat_message", map[string]string{
+		"channel_id": currentChannel.ID,
+		"content":    text,
+		"type":       "text",
+	})
+}
+
+func cmdFriends() {
+	var friends []Friendship
+	if err := apiJSON("GET", "/api/friends", nil, &friends); err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	if len(friends) == 0 {
+		fmt.Println("No friends.")
+		return
+	}
+	for _, f := range friends {
+		other := f.FriendID
+		if f.FriendID == me.ID {
+			other = f.UserID
+		}
+		var u User
+		apiJSON("GET", "/api/users/"+other, nil, &u)
+		name := u.DisplayName
+		if name == "" {
+			name = u.Username
+		}
+		fmt.Printf("  %s [%s] (%s)\n", name, f.Status, u.Status)
+	}
+}
+
+func cmdDMs() {
+	var dms []DMChannel
+	if err := apiJSON("GET", "/api/dm", nil, &dms); err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	if len(dms) == 0 {
+		fmt.Println("No DMs.")
+		return
+	}
+	names := make([]string, len(dms))
+	for i, d := range dms {
+		label := d.Name
+		if label == "" {
+			label = d.ID[:8]
+		}
+		names[i] = label
+	}
+	idx := pick("Select DM: ", names)
+	currentServer = nil
+	currentChannel = &Channel{ID: dms[idx].ID, Name: dms[idx].Name, Type: "text"}
+	fmt.Printf("Opened DM: %s\n", currentChannel.Name)
+	cmdHistory()
+}
+
+func cmdMembers() {
+	if currentServer == nil {
+		fmt.Println("Select a server first")
+		return
+	}
+	var members []Member
+	if err := apiJSON("GET", "/api/servers/"+currentServer.ID+"/members", nil, &members); err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	for _, m := range members {
+		name := m.UserID[:8]
+		if m.User != nil {
+			n := m.User.DisplayName
+			if n == "" {
+				n = m.User.Username
+			}
+			name = n
+		}
+		fmt.Printf("  %s [%s]\n", name, m.Role)
+	}
+}
+
+func cmdInvites() {
+	if currentServer == nil {
+		fmt.Println("Select a server first")
+		return
+	}
+	var invites []Invite
+	if err := apiJSON("GET", "/api/servers/"+currentServer.ID+"/invites", nil, &invites); err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	if len(invites) == 0 {
+		fmt.Println("No invites.")
+		return
+	}
+	for _, inv := range invites {
+		fmt.Printf("  %s (uses: %d/%d)\n", inv.Code, inv.Uses, inv.MaxUses)
+	}
+}
+
+func cmdCreateInvite() {
+	if currentServer == nil {
+		fmt.Println("Select a server first")
+		return
+	}
+	var inv Invite
+	if err := apiJSON("POST", "/api/servers/"+currentServer.ID+"/invites", map[string]interface{}{}, &inv); err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	fmt.Printf("Invite code: %s\n", inv.Code)
+}
+
+func cmdJoinInvite() {
+	code := prompt("Invite code: ")
+	if code == "" {
+		return
+	}
+	if err := apiJSON("POST", "/api/invites/"+code+"/join", nil, nil); err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	fmt.Println("Joined!")
+}
+
+func cmdSearch() {
+	q := prompt("Search users: ")
+	if q == "" {
+		return
+	}
+	var users []User
+	if err := apiJSON("GET", "/api/users/search?q="+url.QueryEscape(q), nil, &users); err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	for _, u := range users {
+		name := u.DisplayName
+		if name == "" {
+			name = u.Username
+		}
+		fmt.Printf("  %s (@%s) [%s] id:%s\n", name, u.Username, u.Status, u.ID)
+	}
+}
+
+func cmdAddFriend() {
+	id := prompt("User ID: ")
+	if id == "" {
+		return
+	}
+	if err := apiJSON("POST", "/api/friends/request", map[string]string{"user_id": id}, nil); err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	fmt.Println("Friend request sent!")
+}
+
+func cmdCreateServer() {
+	name := prompt("Server name: ")
+	if name == "" {
+		return
+	}
+	var s Server
+	if err := apiJSON("POST", "/api/servers", map[string]string{"name": name}, &s); err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	fmt.Printf("Created server: %s\n", s.Name)
+}
+
+func cmdWhere() {
+	if currentServer != nil {
+		fmt.Printf("Server: %s", currentServer.Name)
+	} else {
+		fmt.Print("Server: (none)")
+	}
+	if currentChannel != nil {
+		fmt.Printf(" | Channel: #%s\n", currentChannel.Name)
+	} else {
+		fmt.Println(" | Channel: (none)")
+	}
+}
+
+func printHelp() {
+	fmt.Println(`Commands:
+  /servers         - List & select server
+  /channels        - List & select channel
+  /history         - Show recent messages
+  /friends         - List friends
+  /dms             - List & select DMs
+  /members         - List server members
+  /invites         - List server invites
+  /create-invite   - Create invite for current server
+  /join            - Join server by invite code
+  /search          - Search users
+  /add-friend      - Send friend request by user ID
+  /create-server   - Create a new server
+  /where           - Show current location
+  /quit            - Exit
+  (anything else)  - Send as message to current channel`)
+}
+
+// ── Main ────────────────────────────────────────────────────────────────────
+
+func main() {
+	reader = bufio.NewReader(os.Stdin)
+
+	// Server URL
+	baseURL = os.Getenv("RELAY_URL")
+	if baseURL == "" {
+		baseURL = prompt("Server URL (e.g. http://localhost:3002): ")
+	}
+	baseURL = strings.TrimRight(baseURL, "/")
+
+	// Auth
+	email := os.Getenv("RELAY_EMAIL")
+	pass := os.Getenv("RELAY_PASS")
+	if email == "" {
+		email = prompt("Email: ")
+	}
+	if pass == "" {
+		pass = prompt("Password: ")
+	}
+
+	var auth AuthResponse
+	err := apiJSON("POST", "/api/auth/login", map[string]string{
+		"email": email, "password": pass,
+	}, &auth)
+	if err != nil {
+		fmt.Println("Login failed:", err)
+		os.Exit(1)
+	}
+	token = auth.Token
+	me = auth.User
+	fmt.Printf("Logged in as %s (@%s)\n", me.DisplayName, me.Username)
+
+	// Connect WebSocket
+	connectWS()
+	defer func() {
+		if ws != nil {
+			ws.Close()
 		}
 	}()
 
+	printHelp()
+	fmt.Println()
+
+	// REPL
 	for {
-		select {
-		case env := <-c.inbox:
-			switch env.Type {
-			case "__disconnect__":
-				fmt.Printf("\r⚠ Disconnected, reconnecting...\n> ")
-				continue
-			case "__reconnected__":
-				fmt.Printf("\r✓ Reconnected\n> ")
-				continue
-			case "chat_message":
-				var m Message
-				if json.Unmarshal(env.Payload, &m) == nil && m.ChannelID == ch.ID {
-					msgs = append(msgs, m)
-					fmt.Printf("\r")
-					printMessage(m, len(msgs))
-					fmt.Printf("> ")
-				}
-			case "message_edited":
-				var m Message
-				if json.Unmarshal(env.Payload, &m) == nil && m.ChannelID == ch.ID {
-					for i := range msgs {
-						if msgs[i].ID == m.ID {
-							msgs[i] = m
-							break
-						}
-					}
-					fmt.Printf("\r✎ Message %d edited\n> ", indexOfMsg(msgs, m.ID))
-				}
-			case "typing_start":
-				var p struct {
-					ChannelID string `json:"channel_id"`
-					UserID    string `json:"user_id"`
-				}
-				if json.Unmarshal(env.Payload, &p) == nil && p.ChannelID == ch.ID && p.UserID != c.me.ID {
-					fmt.Printf("\r(someone is typing...)\n> ")
-				}
-			}
-		case line := <-inputCh:
-			if line == "" {
-				continue
-			}
-			switch {
-			case line == "/quit":
-				fmt.Println("Bye!")
-				os.Exit(0)
-			case line == "/switch":
-				return
-			case strings.HasPrefix(line, "/reply "):
-				parts := strings.SplitN(line[7:], " ", 2)
-				if len(parts) < 2 {
-					fmt.Println("Usage: /reply <N> <text>")
-					continue
-				}
-				n, err := strconv.Atoi(strings.TrimSpace(parts[0]))
-				if err != nil || n < 1 || n > len(msgs) {
-					fmt.Println("Invalid message number")
-					continue
-				}
-				target := msgs[n-1]
-				c.sendWS("chat_message", map[string]any{
-					"channel_id":  ch.ID,
-					"content":     parts[1],
-					"type":        "text",
-					"reply_to_id": target.ID,
-				})
-			case strings.HasPrefix(line, "/edit "):
-				parts := strings.SplitN(line[6:], " ", 2)
-				if len(parts) < 2 {
-					fmt.Println("Usage: /edit <N> <new text>")
-					continue
-				}
-				n, err := strconv.Atoi(strings.TrimSpace(parts[0]))
-				if err != nil || n < 1 || n > len(msgs) {
-					fmt.Println("Invalid message number")
-					continue
-				}
-				target := msgs[n-1]
-				if target.UserID != c.me.ID {
-					fmt.Println("You can only edit your own messages")
-					continue
-				}
-				c.sendWS("edit_message", map[string]any{
-					"message_id": target.ID,
-					"content":    parts[1],
-				})
-			case strings.HasPrefix(line, "/history "):
-				nStr := strings.TrimSpace(line[9:])
-				n, err := strconv.Atoi(nStr)
-				if err != nil || n < 1 || n > len(msgs) {
-					fmt.Println("Invalid message number")
-					continue
-				}
-				target := msgs[n-1]
-				type editEntry struct {
-					Content  string `json:"content"`
-					EditedAt string `json:"edited_at"`
-				}
-				history, err := apiJSON[[]editEntry](c, "GET", "/messages/"+target.ID+"/history", nil)
-				if err != nil {
-					fmt.Println("Could not fetch history:", err)
-					continue
-				}
-				if len(history) == 0 {
-					fmt.Println("No edit history for that message.")
-					continue
-				}
-				fmt.Printf("── Edit history for message %d ──\n", n)
-				for i, e := range history {
-					fmt.Printf("  [v%d @ %s] %s\n", i+1, formatTime(e.EditedAt), e.Content)
-				}
-				fmt.Println("  [current] " + target.Content)
-			default:
-				c.sendWS("chat_message", map[string]any{
-					"channel_id": ch.ID,
-					"content":    line,
-					"type":       "text",
-				})
-			}
-		}
-	}
-}
-
-func indexOfMsg(msgs []Message, id string) int {
-	for i, m := range msgs {
-		if m.ID == id {
-			return i + 1
-		}
-	}
-	return 0
-}
-
-// ── Main ──────────────────────────────────────────────────────────────────────
-
-func main() {
-	server := flag.String("server", "https://localhost:8080", "Relay server URL")
-	flag.Parse()
-	c := newClient(*server)
-	fmt.Printf("╔══════════════════════════════╗\n")
-	fmt.Printf("║     Relay Chat CLI           ║\n")
-	fmt.Printf("╚══════════════════════════════╝\n")
-	fmt.Printf("Server: %s\n", *server)
-	if err := c.login(); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
-		os.Exit(1)
-	}
-	fmt.Printf("✓ Logged in as %s\n", c.me.DisplayName)
-	if err := c.connectWS(); err != nil {
-		fmt.Fprintln(os.Stderr, "WebSocket error:", err)
-		os.Exit(1)
-	}
-	fmt.Println("✓ Connected to server")
-	for {
-		ch, err := c.pickChannel()
-		if err != nil {
-			fmt.Println("Error:", err)
-			fmt.Println("Try again? (y/n)")
-			c.scanner.Scan()
-			if strings.TrimSpace(c.scanner.Text()) != "y" {
-				os.Exit(0)
-			}
+		line := prompt("> ")
+		if line == "" {
 			continue
 		}
-		c.chat(ch)
-		fmt.Println("\n(Returning to channel picker...)")
+		switch {
+		case line == "/quit" || line == "/q":
+			return
+		case line == "/servers":
+			cmdServers()
+		case line == "/channels" || line == "/ch":
+			cmdChannels()
+		case line == "/history" || line == "/h":
+			cmdHistory()
+		case line == "/friends" || line == "/f":
+			cmdFriends()
+		case line == "/dms":
+			cmdDMs()
+		case line == "/members" || line == "/m":
+			cmdMembers()
+		case line == "/invites":
+			cmdInvites()
+		case line == "/create-invite":
+			cmdCreateInvite()
+		case line == "/join":
+			cmdJoinInvite()
+		case line == "/search":
+			cmdSearch()
+		case line == "/add-friend":
+			cmdAddFriend()
+		case line == "/create-server":
+			cmdCreateServer()
+		case line == "/where" || line == "/w":
+			cmdWhere()
+		case line == "/help" || line == "/?":
+			printHelp()
+		case strings.HasPrefix(line, "/"):
+			fmt.Println("Unknown command. /help for list.")
+		default:
+			cmdSend(line)
+		}
 	}
 }
