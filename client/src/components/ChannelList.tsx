@@ -22,9 +22,10 @@ interface Props {
   isAdmin?: boolean
   serverId?: string
   onChannelsChanged?: () => void
+  unreadChannels?: Record<string, { count: number; mentioned: boolean }>
 }
 
-export default function ChannelList({ channels, selected, onSelect, voicePresence, isAdmin, serverId, onChannelsChanged }: Props) {
+export default function ChannelList({ channels, selected, onSelect, voicePresence, isAdmin, serverId, onChannelsChanged, unreadChannels }: Props) {
   const textChannels = channels.filter((c) => c.type === 'text')
   const voiceChannels = channels.filter((c) => c.type === 'voice')
   const [settingsChannel, setSettingsChannel] = useState<Channel | null>(null)
@@ -95,10 +96,15 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
         onDrop={(e) => { e.preventDefault(); handleDrop(ch) }}
       >
         <button
-          className={`channel-item ${selected?.id === ch.id ? 'active' : ''}`}
+          className={`channel-item ${selected?.id === ch.id ? 'active' : ''}${unreadChannels?.[ch.id] ? ' unread' : ''}${unreadChannels?.[ch.id]?.mentioned ? ' has-mention' : ''}`}
           onClick={() => onSelect(ch)}
         >
           <span className="channel-hash">{ch.type === 'voice' ? '🔊' : '#'}</span> {ch.name}
+          {unreadChannels?.[ch.id] && (
+            <span className={`channel-unread-badge${unreadChannels?.[ch.id]?.mentioned ? ' mention' : ''}`}>
+              {unreadChannels?.[ch.id]?.mentioned ? '@' : unreadChannels?.[ch.id]?.count}
+            </span>
+          )}
         </button>
         {isAdmin && (
           <div className="channel-actions">

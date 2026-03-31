@@ -30,7 +30,7 @@ function isImageUrl(url: string): boolean {
 }
 
 // Formatting: ||spoilers||, ***bold italic***, **bold**, *italics*, ~~strikethrough~~, `code`, @mentions
-function renderFormattedText(text: string, keyPrefix: string): (string | React.ReactElement)[] {
+function renderFormattedText(text: string, keyPrefix: string, selfUsername?: string): (string | React.ReactElement)[] {
   const FORMAT_REGEX = /(\|\|.+?\|\||\*\*\*.+?\*\*\*|\*\*.+?\*\*|\*.+?\*|~~.+?~~|`.+?`|@\w+)/g
   const parts = text.split(FORMAT_REGEX)
   return parts.map((part, i) => {
@@ -54,7 +54,8 @@ function renderFormattedText(text: string, keyPrefix: string): (string | React.R
       return <code key={`${keyPrefix}-${i}`} className="inline-code">{part.slice(1, -1)}</code>
     }
     if (part.startsWith('@') && part.length > 1) {
-      return <span key={`${keyPrefix}-${i}`} className="mention-highlight">@{part.slice(1)}</span>
+      const isSelf = selfUsername && part.slice(1).toLowerCase() === selfUsername.toLowerCase()
+      return <span key={`${keyPrefix}-${i}`} className={`mention-highlight${isSelf ? ' mention-self' : ''}`}>@{part.slice(1)}</span>
     }
     return part
   })
@@ -79,7 +80,7 @@ function renderCodeBlock(lang: string, code: string, key: string): React.ReactEl
   )
 }
 
-function renderMessageContent(content: string) {
+function renderMessageContent(content: string, selfUsername?: string) {
   const result: (string | React.ReactElement)[] = []
   // Split on triple-backtick code blocks first
   const CODE_BLOCK_REGEX = /```([\w]*)?\n?([\s\S]*?)```/g
@@ -89,7 +90,7 @@ function renderMessageContent(content: string) {
 
   while ((match = CODE_BLOCK_REGEX.exec(content)) !== null) {
     const before = content.slice(lastIndex, match.index)
-    if (before) renderInlineContent(before, `pre${blockIndex}`, result)
+    if (before) renderInlineContent(before, `pre${blockIndex}`, result, selfUsername)
     const lang = (match[1] ?? '').trim()
     const code = match[2] ?? ''
     result.push(renderCodeBlock(lang, code, `cb${blockIndex}`))
@@ -97,11 +98,11 @@ function renderMessageContent(content: string) {
     blockIndex++
   }
   const remaining = content.slice(lastIndex)
-  if (remaining) renderInlineContent(remaining, `pre${blockIndex}`, result)
+  if (remaining) renderInlineContent(remaining, `pre${blockIndex}`, result, selfUsername)
   return result
 }
 
-function renderInlineContent(text: string, keyPrefix: string, result: (string | React.ReactElement)[]) {
+function renderInlineContent(text: string, keyPrefix: string, result: (string | React.ReactElement)[], selfUsername?: string) {
   // Split by URLs, then by newlines
   const parts = text.split(URL_REGEX)
   const urls = text.match(URL_REGEX) || []
@@ -110,7 +111,7 @@ function renderInlineContent(text: string, keyPrefix: string, result: (string | 
     if (part) {
       const lines = part.split(/\n/)
       lines.forEach((line, j) => {
-        if (line) result.push(...renderFormattedText(line, `${keyPrefix}-f${i}-${j}`))
+        if (line) result.push(...renderFormattedText(line, `${keyPrefix}-f${i}-${j}`, selfUsername))
         if (j < lines.length - 1) result.push(<br key={`${keyPrefix}-br-${i}-${j}`} />)
       })
     }
@@ -216,6 +217,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<Message[] | null>(null)
   const [searchLoading, setSearchLoading] = useState(false)
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const isAtBottomRef = useRef(true)
@@ -928,10 +930,13 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
           const isGrouped = prev && prev.user_id === m.user_id &&
             new Date(m.created_at).getTime() - new Date(prev.created_at).getTime() < 5 * 60 * 1000
 
+          const isMentioned = user?.username && new RegExp(`@${user.username}\\b`, 'i').test(m.content)
+          const isReplyToSelf = !!user && (m.reply_to?.user_id === user.id || (!m.reply_to && m.reply_to_id && messages.find(x => x.id === m.reply_to_id)?.user_id === user.id))
+
           return (
             <div
               key={m.id}
-              className={`message ${m.user_id === user?.id ? 'own' : ''} ${isGrouped ? 'grouped' : ''}`}
+              className={`message ${m.user_id === user?.id ? 'own' : ''} ${isGrouped ? 'grouped' : ''}${isMentioned ? ' mentioned' : ''}${isReplyToSelf && m.user_id !== user?.id ? ' replied-to-self' : ''}`}
               ref={el => { messageRefs.current[m.id] = el }}
               data-msgid={m.id}
             >
@@ -1022,7 +1027,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                   </div>
                 ) : (
                   <div className="message-body">
-                    {renderMessageContent(m.content)}
+                    {renderMessageContent(m.content, user?.username)}
                     {m.edited && (
                       <span
                         className="edited-badge"
@@ -1121,6 +1126,37 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
       )}
 
       <div className="input-wrapper">
+        {showEmojiPicker && (
+          <div className="emoji-picker">
+            {[
+              { cat: 'Smileys', emojis: ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','😊','😇','🥰','😍','🤩','😘','😋','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','😐','😑','😶','😏','😒','🙄','😬','😮‍💨','🤥','😌','😔','😪','🤤','😴','😷','🤒','🤕','🤮','🥴','😵','🤯','🥳','🥸','😎','🤓','🧐'] },
+              { cat: 'Gestures', emojis: ['👋','🤚','🖐️','✋','🖖','👌','🤌','🤏','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','👇','☝️','👍','👎','✊','👊','🤛','🤜','👏','🙌','👐','🤲','🤝','🙏'] },
+              { cat: 'Hearts', emojis: ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟'] },
+              { cat: 'Objects', emojis: ['🔥','⭐','🌟','✨','💫','🎉','🎊','🎈','💯','💢','💥','💣','🕳️','💬','👁️‍🗨️','💀','👻','👽','🤖','💩','🎵','🎶','🔔','📢','💻','🖥️','📱','⌨️','🎮','🕹️'] },
+              { cat: 'Reactions', emojis: ['👀','💪','🫡','🫠','😤','😡','🥺','😭','💅','✅','❌','⚠️','🚀','🏆','🎯','🤷','🤦','💭','🗿','☕'] },
+            ].map((group) => (
+              <div key={group.cat} className="emoji-category">
+                <div className="emoji-category-label">{group.cat}</div>
+                <div className="emoji-grid">
+                  {group.emojis.map((em) => (
+                    <button
+                      key={em}
+                      type="button"
+                      className="emoji-item"
+                      onClick={() => {
+                        setInput((prev) => prev + em)
+                        setShowEmojiPicker(false)
+                        inputRef.current?.focus()
+                      }}
+                    >
+                      {em}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         {mentionUsers.length > 0 && (
           <div className="mention-dropdown">
             {mentionUsers.map((u) => (
@@ -1135,6 +1171,9 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
           <input type="file" ref={fileInputRef} onChange={handleFileSelect} multiple style={{ display: 'none' }} />
           <button type="button" className="upload-btn" onClick={() => fileInputRef.current?.click()} title="Upload file">
             📎
+          </button>
+          <button type="button" className="emoji-btn" onClick={() => setShowEmojiPicker((p) => !p)} title="Emoji">
+            😀
           </button>
           <textarea
             ref={inputRef}

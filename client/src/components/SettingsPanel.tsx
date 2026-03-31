@@ -274,6 +274,51 @@ export default function SettingsPanel({ onClose }: Props) {
                 <span>Auto Gain Control</span>
               </label>
 
+              <h3 className="settings-section">Audio Mode</h3>
+              <div className="settings-radio-group">
+                <label className="settings-toggle">
+                  <input
+                    type="radio"
+                    name="channelCount"
+                    checked={settings.channelCount === 1}
+                    onChange={() => update({ channelCount: 1 })}
+                  />
+                  <span>Mono (recommended for voice)</span>
+                </label>
+                <label className="settings-toggle">
+                  <input
+                    type="radio"
+                    name="channelCount"
+                    checked={settings.channelCount === 2}
+                    onChange={() => update({ channelCount: 2 })}
+                  />
+                  <span>Stereo</span>
+                </label>
+              </div>
+
+              <h3 className="settings-section">Noise Gate</h3>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={settings.noiseGateEnabled}
+                  onChange={(e) => update({ noiseGateEnabled: e.target.checked })}
+                />
+                <span>Enable Noise Gate</span>
+              </label>
+              {settings.noiseGateEnabled && (
+                <label className="settings-slider">
+                  <span>Threshold</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={settings.noiseGateThreshold}
+                    onChange={(e) => update({ noiseGateThreshold: Number(e.target.value) })}
+                  />
+                  <span className="slider-value">{settings.noiseGateThreshold}</span>
+                </label>
+              )}
+
               <h3 className="settings-section">Camera</h3>
               <select
                 value={settings.videoDevice}

@@ -9,6 +9,10 @@ export interface MediaSettings {
   noiseSuppression: boolean  // browser-level noise suppression
   echoCancellation: boolean  // browser-level echo cancellation
   autoGainControl: boolean   // browser-level auto gain control
+  channelCount: 1 | 2        // 1 = mono, 2 = stereo
+  noiseGateEnabled: boolean  // client-side noise gate
+  noiseGateThreshold: number // 0-100 noise gate threshold
+  userVolumes: Record<string, number>  // per-user volume overrides (userId -> 0-200)
 }
 
 const STORAGE_KEY = 'relay_media_settings'
@@ -22,6 +26,10 @@ const defaults: MediaSettings = {
   noiseSuppression: true,
   echoCancellation: true,
   autoGainControl: true,
+  channelCount: 1,
+  noiseGateEnabled: false,
+  noiseGateThreshold: 15,
+  userVolumes: {},
 }
 
 export function getSettings(): MediaSettings {

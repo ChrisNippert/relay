@@ -509,6 +509,33 @@ html, body, #root {
   color: var(--text-primary);
 }
 
+.channel-item.unread {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.channel-item.has-mention {
+  color: #faa61a;
+}
+
+.channel-unread-badge {
+  margin-left: auto;
+  background: var(--text-muted, #888);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+}
+.channel-unread-badge.mention {
+  background: #faa61a;
+  color: #000;
+}
+
 .channel-item.pending {
   justify-content: space-between;
 }
@@ -1854,6 +1881,30 @@ html, body, #root {
   display: flex;
 }
 
+.voice-tile-media.voice-tile-unwatched {
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--bg-tertiary, #1a1a2e);
+  cursor: pointer;
+}
+.voice-tile-unwatched .voice-tile-avatar {
+  font-size: 2rem;
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--bg-secondary, #1e1e2e);
+}
+.voice-tile-watch-label {
+  font-size: 0.75rem;
+  color: var(--text-muted, #888);
+  opacity: 0.8;
+}
+
 .voice-tile-video-pane {
   position: relative;
   flex: 1;
@@ -2313,6 +2364,22 @@ html, body, #root {
   color: var(--danger);
 }
 
+.unfriend-confirm-label {
+  font-size: 0.7rem;
+  color: var(--danger, #e94560);
+  font-weight: 600;
+  margin-right: 2px;
+}
+.friend-action-btn.unfriend-confirm-yes {
+  color: var(--danger, #e94560);
+}
+.friend-action-btn.unfriend-confirm-yes:hover {
+  background: rgba(233, 69, 96, 0.25);
+}
+.friend-action-btn.unfriend-confirm-no:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
 /* Chat Header Call Buttons */
 .chat-header-actions {
   display: flex;
@@ -2633,6 +2700,68 @@ html, body, #root {
 
 .upload-btn:hover {
   opacity: 1;
+}
+
+/* ── Emoji Picker ─────────────────────────────────────────── */
+.emoji-btn {
+  background: none;
+  border: none;
+  font-size: 1.3rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+.emoji-btn:hover {
+  opacity: 1;
+}
+
+.emoji-picker {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  width: 340px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border, #3a3a5c);
+  border-radius: 8px;
+  padding: 8px;
+  z-index: 100;
+  box-shadow: 0 -4px 16px rgba(0,0,0,0.4);
+}
+
+.emoji-category-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: var(--text-muted, #888);
+  padding: 6px 2px 4px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.emoji-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.emoji-item {
+  background: none;
+  border: none;
+  font-size: 1.4rem;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.emoji-item:hover {
+  background: var(--bg-hover, rgba(255,255,255,0.08));
 }
 
 .pending-files {
@@ -3242,6 +3371,24 @@ html, body, #root {
 }
 .mention-highlight:hover {
   background: rgba(88, 101, 242, 0.35);
+}
+
+.mention-highlight.mention-self {
+  background: rgba(250, 166, 26, 0.25);
+  color: #faa61a;
+}
+.mention-highlight.mention-self:hover {
+  background: rgba(250, 166, 26, 0.4);
+}
+
+/* Message highlighted when you are mentioned or replied to */
+.message.mentioned {
+  background: rgba(250, 166, 26, 0.06);
+  border-left: 3px solid #faa61a;
+}
+.message.replied-to-self {
+  background: rgba(88, 101, 242, 0.06);
+  border-left: 3px solid #5865f2;
 }
 
 /* ── Edit history modal ─────────────────────────────────────── */

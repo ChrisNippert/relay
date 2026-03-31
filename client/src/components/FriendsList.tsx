@@ -18,6 +18,7 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, 
   const [dmByUser, setDmByUser] = useState<Map<string, Channel>>(new Map())
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [confirmUnfriend, setConfirmUnfriend] = useState<string | null>(null)
   const [searchResults, setSearchResults] = useState<User[]>([])
   const [searching, setSearching] = useState(false)
   const [searchError, setSearchError] = useState('')
@@ -222,13 +223,33 @@ export default function FriendsList({ dmChannels, onSelectChannel, onStartCall, 
                       </button>
                     </>
                   )}
-                  <button
-                    className="friend-action-btn unfriend"
-                    onClick={() => handleUnfriend(f.id, otherId)}
-                    title="Unfriend"
-                  >
-                    ✕
-                  </button>
+                  {confirmUnfriend === f.id ? (
+                    <>
+                      <span className="unfriend-confirm-label">Remove?</span>
+                      <button
+                        className="friend-action-btn unfriend-confirm-yes"
+                        onClick={() => { handleUnfriend(f.id, otherId); setConfirmUnfriend(null) }}
+                        title="Confirm unfriend"
+                      >
+                        ✓
+                      </button>
+                      <button
+                        className="friend-action-btn unfriend-confirm-no"
+                        onClick={() => setConfirmUnfriend(null)}
+                        title="Cancel"
+                      >
+                        ✕
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="friend-action-btn unfriend"
+                      onClick={() => setConfirmUnfriend(f.id)}
+                      title="Unfriend"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
               </div>
             )

@@ -41,6 +41,7 @@ export default function Home() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [showMembers, setShowMembers] = useState(true)
   const [channelSidebarCollapsed, setChannelSidebarCollapsed] = useState(false)
+  const [unreadChannels, setUnreadChannels] = useState<Record<string, { count: number; mentioned: boolean }>>({})
 
   // Poll voice ref state to keep sidebar controls in sync
   const syncVoiceControls = useCallback(() => {
@@ -84,6 +85,12 @@ export default function Home() {
         const m = msg.payload as Message
         if (m.user_id !== user?.id && (m.channel_id !== selectedChannelRef.current?.id || document.hidden)) {
           playMessageSound()
+          // Track unread
+          const mentioned = !!(user?.username && new RegExp(`@${user.username}\\b`, 'i').test(m.content))
+          setUnreadChannels((prev) => {
+            const existing = prev[m.channel_id] || { count: 0, mentioned: false }
+            return { ...prev, [m.channel_id]: { count: existing.count + 1, mentioned: existing.mentioned || mentioned } }
+          })
         }
       } else if (msg.type === 'call_offer') {
         const payload = msg.payload as { from_user_id?: string; channel_id?: string; signal?: RTCSessionDescriptionInit }
@@ -310,6 +317,13 @@ export default function Home() {
 
   const handleSelectChannel = (channel: Channel) => {
     setSelectedChannel(channel)
+    // Clear unread badge for this channel
+    setUnreadChannels((prev) => {
+      if (!prev[channel.id]) return prev
+      const next = { ...prev }
+      delete next[channel.id]
+      return next
+    })
     // Clicking a voice channel auto-joins it
     if (channel.type === 'voice' && activeVoiceChannel?.id !== channel.id) {
       // If already in a different voice channel, leave it first
@@ -475,6 +489,7 @@ export default function Home() {
                   isAdmin={isAdmin}
                   serverId={selectedServer?.id}
                   onChannelsChanged={refreshChannels}
+                  unreadChannels={unreadChannels}
                 />
               </div>
             </div>
