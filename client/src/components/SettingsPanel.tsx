@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { getSettings, saveSettings, getDevices, type MediaSettings, THEME_PRESETS, getThemeId, saveThemeId, applyTheme } from '../services/settings'
 import { useAuth } from '../context/AuthContext'
 import * as api from '../services/api'
+import type { Device } from '../types'
 
 interface Props {
   onClose: () => void
@@ -30,12 +31,35 @@ export default function SettingsPanel({ onClose }: Props) {
   const [nameColor, setNameColor] = useState(user?.name_color ?? '')
   const [profileSaving, setProfileSaving] = useState(false)
   const [profileSaved, setProfileSaved] = useState(false)
-  const [tab, setTab] = useState<'profile' | 'media' | 'theme'>('profile')
+  const [tab, setTab] = useState<'profile' | 'media' | 'theme' | 'devices'>('profile')
   const [activeTheme, setActiveTheme] = useState(getThemeId)
   const [micTestStream, setMicTestStream] = useState<MediaStream | null>(null)
   const [micLevel, setMicLevel] = useState(0)
   const micTestCtxRef = useRef<AudioContext | null>(null)
   const micTestAnimRef = useRef<number>(0)
+
+  // E2E device approval state
+  const [e2eDevices, setE2eDevices] = useState<Device[]>([])
+  const [pendingDevices, setPendingDevices] = useState<Device[]>([])
+  const [e2eLoaded, setE2eLoaded] = useState(false)
+
+  const loadE2eDevices = useCallback(async () => {
+    try {
+      const [all, pending] = await Promise.all([api.getMyDevices(), api.getPendingDevices()])
+      setE2eDevices(all)
+      setPendingDevices(pending)
+      setE2eLoaded(true)
+    } catch { setE2eLoaded(true) }
+  }, [])
+
+  useEffect(() => {
+    if (tab === 'devices' && !e2eLoaded) loadE2eDevices()
+  }, [tab, e2eLoaded, loadE2eDevices])
+
+  // Load pending count on mount for badge display
+  useEffect(() => {
+    api.getPendingDevices().then(setPendingDevices).catch(() => {})
+  }, [])
 
   // Only load devices when media tab is opened
   useEffect(() => {
@@ -184,6 +208,9 @@ export default function SettingsPanel({ onClose }: Props) {
           </button>
           <button className={`settings-tab ${tab === 'theme' ? 'active' : ''}`} onClick={() => setTab('theme')}>
             Theme
+          </button>
+          <button className={`settings-tab ${tab === 'devices' ? 'active' : ''}`} onClick={() => setTab('devices')}>
+            Devices{pendingDevices.length > 0 && <span className="pending-badge">{pendingDevices.length}</span>}
           </button>
         </div>
 
@@ -512,6 +539,65 @@ export default function SettingsPanel({ onClose }: Props) {
                 </button>
               ))}
             </div>
+          </div>
+        )}
+        {tab === 'devices' && (
+          <div className="settings-body">
+            <h3 className="settings-section">E2E Devices</h3>
+            <p className="settings-hint">Devices are used for end-to-end encryption. New devices require approval from an existing device before they can decrypt messages.</p>
+            {!e2eLoaded ? (
+              <p className="settings-loading">Loading devices...</p>
+            ) : (
+              <>
+                {pendingDevices.length > 0 && (
+                  <div className="device-section">
+                    <h4 className="device-section-title">Pending Approval</h4>
+                    {pendingDevices.map((d) => (
+                      <div key={d.id} className="device-item pending">
+                        <div className="device-info">
+                          <span className="device-name">{d.name || 'Unnamed device'}</span>
+                          <span className="device-id">{d.id.slice(0, 8)}…</span>
+                          <span className="device-date">{new Date(d.created_at).toLocaleDateString()}</span>
+                        </div>
+                        <div className="device-actions">
+                          <button className="approve-btn" onClick={async () => {
+                            await api.approveDevice(d.id)
+                            loadE2eDevices()
+                          }}>Approve</button>
+                          <button className="reject-btn" onClick={async () => {
+                            await api.rejectDevice(d.id)
+                            loadE2eDevices()
+                          }}>Reject</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="device-section">
+                  <h4 className="device-section-title">Approved Devices</h4>
+                  {e2eDevices.filter(d => d.approved).map((d) => {
+                    const isCurrent = d.id === localStorage.getItem('relay_device_id')
+                    return (
+                      <div key={d.id} className={`device-item ${isCurrent ? 'current' : ''}`}>
+                        <div className="device-info">
+                          <span className="device-name">{d.name || 'Unnamed device'}{isCurrent && ' (this device)'}</span>
+                          <span className="device-id">{d.id.slice(0, 8)}…</span>
+                          <span className="device-date">{new Date(d.created_at).toLocaleDateString()}</span>
+                        </div>
+                        {!isCurrent && (
+                          <div className="device-actions">
+                            <button className="reject-btn" onClick={async () => {
+                              await api.deleteDevice(d.id)
+                              loadE2eDevices()
+                            }}>Remove</button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            )}
           </div>
         )}
 

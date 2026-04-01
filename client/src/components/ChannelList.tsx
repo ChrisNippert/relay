@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Channel } from '../types'
 import * as api from '../services/api'
+import * as e2e from '../services/e2e'
 import { useAuth } from '../context/AuthContext'
 import ChannelSettings from './ChannelSettings'
 
@@ -37,6 +38,7 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
   const [creatingType, setCreatingType] = useState<'text' | 'voice' | null>(null)
   const [createName, setCreateName] = useState('')
   const [createDescription, setCreateDescription] = useState('')
+  const [createEncrypted, setCreateEncrypted] = useState(false)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [voiceCtxMenu, setVoiceCtxMenu] = useState<{ x: number; y: number; userId: string; displayName: string; channelId: string } | null>(null)
@@ -46,14 +48,20 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
     setCreatingType(type)
     setCreateName('')
     setCreateDescription('')
+    setCreateEncrypted(false)
   }
 
   const handleCreateSubmit = async () => {
     if (!serverId || !creatingType || !createName.trim()) return
-    await api.createChannel(serverId, createName.trim(), creatingType, createDescription.trim())
+    const channel = await api.createChannel(serverId, createName.trim(), creatingType, createDescription.trim())
+    if (createEncrypted && channel?.id) {
+      await e2e.enableEncryption(channel.id)
+      window.dispatchEvent(new CustomEvent('channel-encryption-enabled', { detail: { channelId: channel.id } }))
+    }
     setCreatingType(null)
     setCreateName('')
     setCreateDescription('')
+    setCreateEncrypted(false)
     onChannelsChanged?.()
   }
 
@@ -159,6 +167,24 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
                 }}
               />
             </div>
+            {creatingType === 'text' && (
+              <>
+                <h3 className="settings-section">Encryption</h3>
+                <label className="ch-settings-encrypt-toggle">
+                  <input
+                    type="checkbox"
+                    checked={createEncrypted}
+                    onChange={(e) => setCreateEncrypted(e.target.checked)}
+                  />
+                  <span>Enable end-to-end encryption</span>
+                </label>
+                {createEncrypted && (
+                  <p className="ch-settings-enc-warn" style={{ marginTop: 4 }}>
+                    ⚠️ Encryption is permanent and cannot be disabled later.
+                  </p>
+                )}
+              </>
+            )}
           </div>
           <div className="settings-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
             <button className="danger-btn" style={{ background: 'var(--bg-tertiary)' }} onClick={handleCreateCancel}>Cancel</button>

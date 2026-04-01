@@ -14,6 +14,7 @@ export function connect() {
   // Close existing connection to prevent duplicates (e.g. React StrictMode double-mount)
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
     ws.onclose = null // prevent reconnect timer
+    ws.onerror = null // prevent error logging on teardown
     ws.close()
   }
 

@@ -23,6 +23,7 @@ type Device struct {
 	Name       string    `json:"name"`
 	PublicKey  string    `json:"public_key"`
 	SigningKey string    `json:"signing_key"`
+	Approved   bool      `json:"approved"`
 	CreatedAt  time.Time `json:"created_at"`
 }
 

@@ -35,8 +35,10 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		MaxAge:           300,
 	}))
 
-	// Global rate limit: 120 requests/minute per IP
-	r.Use(RateLimitMiddleware(120, time.Minute))
+	// Global rate limit: 600 requests/minute per IP
+	// Key distribution during E2EE rotation can send 50+ requests in a burst
+	// (one setChannelKey per device per epoch), so the limit must accommodate this.
+	r.Use(RateLimitMiddleware(600, time.Minute))
 
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -124,12 +126,19 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		r.Delete("/api/users/me/channel-keys", DeleteMyChannelKeysHandler(database))
 		r.Get("/api/channels/{channelID}/devices", GetChannelDevicesHandler(database))
 		r.Get("/api/channels/{channelID}/epoch", GetChannelEpochHandler(database))
+		r.Post("/api/channels/{channelID}/rotate-key", RateLimitHandler(3, time.Minute, RotateChannelKeyHandler(database)))
+		r.Post("/api/channels/{channelID}/claim-epoch", ClaimEpochHandler(database))
+		r.Get("/api/channels/{channelID}/master-keys", GetMasterKeysHandler(database))
+		r.Post("/api/channels/{channelID}/master-keys", SetMasterKeysHandler(database, hub))
 
 		// Devices (E2E per-device keys)
-		r.Post("/api/devices", RegisterDeviceHandler(database))
+		r.Post("/api/devices", RegisterDeviceHandler(database, hub))
 		r.Get("/api/devices", GetMyDevicesHandler(database))
 		r.Delete("/api/devices/{deviceID}", DeleteDeviceHandler(database))
 		r.Get("/api/users/{userID}/devices", GetUserDevicesHandler(database))
+		r.Get("/api/devices/pending", GetPendingDevicesHandler(database))
+		r.Post("/api/devices/{deviceID}/approve", ApproveDeviceHandler(database, hub))
+		r.Delete("/api/devices/{deviceID}/reject", RejectDeviceHandler(database))
 
 		// File upload
 		r.Post("/api/upload", UploadHandler(cfg, database))

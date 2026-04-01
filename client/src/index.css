@@ -773,6 +773,21 @@ html, body, #root {
   gap: 10px;
 }
 
+.ch-settings-encrypt-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+.ch-settings-encrypt-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
 .ch-settings-confirm-code {
   font-family: 'JetBrains Mono', 'Consolas', 'Monaco', 'Courier New', monospace;
   font-size: 1.5rem;
@@ -3298,6 +3313,23 @@ html, body, #root {
   text-decoration: underline;
 }
 
+/* ── Signature verification badges ──────────────────────────── */
+.sig-badge {
+  margin-left: 4px;
+  font-size: 0.7rem;
+  vertical-align: middle;
+  cursor: default;
+  user-select: none;
+}
+.sig-bad {
+  color: #e74c3c;
+  opacity: 0.9;
+}
+.sig-ok {
+  opacity: 0.4;
+  font-size: 0.6rem;
+}
+
 /* ── Message hover action buttons ──────────────────────────── */
 .message-actions {
   display: none;
@@ -3758,6 +3790,93 @@ html, body, #root {
   margin-top: 24px;
   padding-top: 16px;
   border-top: 1px solid var(--border);
+}
+
+/* ── Device approval ───────────────────────────────────────── */
+.settings-hint {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+  line-height: 1.4;
+}
+.device-section {
+  margin-bottom: 16px;
+}
+.device-section-title {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  letter-spacing: 0.05em;
+}
+.device-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--bg-primary);
+  margin-bottom: 4px;
+}
+.device-item.pending {
+  border-left: 3px solid var(--warning, #f1c40f);
+}
+.device-item.current {
+  border-left: 3px solid var(--accent);
+}
+.device-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.device-name {
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+.device-id {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+.device-date {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+.device-actions {
+  display: flex;
+  gap: 6px;
+}
+.approve-btn {
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.approve-btn:hover { opacity: 0.85; }
+.reject-btn {
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: none;
+  background: var(--danger, #e74c3c);
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.reject-btn:hover { opacity: 0.85; }
+.pending-badge {
+  display: inline-block;
+  background: var(--danger, #e74c3c);
+  color: #fff;
+  font-size: 0.7rem;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
+  text-align: center;
+  margin-left: 6px;
 }
 
 /* Theme picker */

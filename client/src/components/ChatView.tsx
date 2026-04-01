@@ -268,6 +268,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
   const [popover, setPopover] = useState<{ userId: string; rect: DOMRect } | null>(null)
   const [encrypted, setEncrypted] = useState(false)
   const [encryptionReady, setEncryptionReady] = useState(false)
+  const [reDecryptTrigger, setReDecryptTrigger] = useState(0)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -308,20 +309,44 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
   const keyRequestSentRef = useRef(false)
 
   // Check if channel has E2E encryption enabled
-  const checkEncryption = useCallback(async () => {
+  const checkEncryption = useCallback(async (forceRefresh = false) => {
     try {
       const enc = await e2e.isChannelEncrypted(channel.id)
       setEncrypted(enc)
       if (enc) {
-        const key = await e2e.getChannelKey(channel.id)
+        const key = await e2e.getChannelKey(channel.id, forceRefresh)
         setEncryptionReady(key !== null)
         console.log('%c[E2E]', 'color: #00e0ff; font-weight: bold', `Channel ${channel.id.slice(0,8)}… encrypted=${enc} keyReady=${key !== null}`)
         if (key) {
-          // We have the key — redistribute to our other devices only
+          // We have the key — but if this is a new device that only has master keys
+          // (no per-device entry), rotate to establish a new epoch for forward secrecy.
+          if (!keyRequestSentRef.current) {
+            const hasEntry = await e2e.hasDeviceKeyEntry(channel.id)
+            if (!hasEntry) {
+              keyRequestSentRef.current = true
+              console.log('%c[E2E]', 'color: #00e0ff; font-weight: bold', `New device — rotating for channel ${channel.id.slice(0,8)}…`)
+              await e2e.rotateKeys(channel.id)
+              setEncryptionReady(true)
+              return true
+            }
+          }
+          // Existing device — redistribute to our other devices only
           e2e.redistributeKeys(channel.id)
         } else if (!keyRequestSentRef.current) {
-          // No key for this device — ask other channel members to rotate (only once)
+          // No key for this device — self-rotate per protocol §8.5.3:
+          // generate new epoch key ourselves and distribute to all devices.
+          // This avoids depending on another user being online.
           keyRequestSentRef.current = true
+          console.log('%c[E2E]', 'color: #00e0ff; font-weight: bold', `Self-rotating for channel ${channel.id.slice(0,8)}…`)
+          const rotated = await e2e.rotateKeys(channel.id)
+          if (rotated) {
+            setEncryptionReady(true)
+            // Ask other members to redistribute their older epoch keys to us
+            // so we can decrypt historical messages from before we joined.
+            send('key_request', { channel_id: channel.id })
+            return true
+          }
+          // Fallback: ask others to rotate if self-rotation failed
           send('key_request', { channel_id: channel.id })
         }
         return key !== null
@@ -344,7 +369,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     // Retry key check — another client may not have distributed the key yet
     const tryCheck = async (attempt: number) => {
       if (cancelled) return
-      const ready = await checkEncryption()
+      const ready = await checkEncryption(attempt > 1) // force refresh on retries
       if (!ready && !cancelled && attempt < 5) {
         setTimeout(() => tryCheck(attempt + 1), 2000 * attempt)
       }
@@ -371,8 +396,8 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
               if (!m.content.includes('[encrypted')) return m
               const raw = rawMap.get(m.id)
               if (!raw || !e2e.isEncryptedContent(raw.content)) return m
-              const plain = await e2e.decryptMessage(channel.id, raw.content, raw.key_epoch)
-              return { ...m, content: plain }
+              const result = await e2e.decryptMessage(channel.id, raw.content, raw.key_epoch, undefined, true)
+              return { ...m, content: result.text, verified: result.verified }
             })
           )
           if (!cancelled) {
@@ -388,7 +413,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
       })
     }).catch(console.error)
     return () => { cancelled = true }
-  }, [encryptionReady, channel.id])
+  }, [encryptionReady, channel.id, reDecryptTrigger])
 
   // Re-check encryption when it's enabled from ChannelSettings
   useEffect(() => {
@@ -451,13 +476,17 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     api.getMessages(channel.id).then(async (msgs) => {
       if (stale) return
       const ordered = msgs.reverse()
+      // Pre-warm all epoch keys before bulk decryption to avoid redundant API calls
+      if (ordered.some(m => e2e.isEncryptedContent(m.content))) {
+        await e2e.preWarmKeys(channel.id)
+      }
       // Decrypt any E2E-encrypted messages
       const decrypted = await Promise.all(
         ordered.map(async (m) => {
           seenMsgIds.current.add(m.id)
           if (e2e.isEncryptedContent(m.content)) {
-            const plain = await e2e.decryptMessage(channel.id, m.content, m.key_epoch)
-            return { ...m, content: plain }
+            const result = await e2e.decryptMessage(channel.id, m.content, m.key_epoch, undefined, true)
+            return { ...m, content: result.text, verified: result.verified }
           }
           return m
         })
@@ -480,8 +509,10 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
           const handleMsg = async () => {
             let decrypted = m
             if (e2e.isEncryptedContent(m.content)) {
-              const plain = await e2e.decryptMessage(channel.id, m.content, m.key_epoch)
-              decrypted = { ...m, content: plain }
+              const result = await e2e.decryptMessage(channel.id, m.content, m.key_epoch)
+              decrypted = { ...m, content: result.text, verified: result.verified }
+              // If decryption failed (missing key), the re-decrypt effect will
+              // pick it up once the key arrives via channel_keys_updated.
             }
             setMessages((prev) => prev.some((x) => x.id === decrypted.id) ? prev : [...prev, decrypted])
           }
@@ -496,7 +527,15 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
       } else if (msg.type === 'message_edited') {
         const m = msg.payload as Message
         if (m.channel_id === channel.id) {
-          setMessages((prev) => prev.map((x) => x.id === m.id ? { ...x, ...m } : x))
+          const handleEdit = async () => {
+            let updated = m
+            if (e2e.isEncryptedContent(m.content)) {
+              const result = await e2e.decryptMessage(channel.id, m.content, m.key_epoch)
+              updated = { ...m, content: result.text, verified: result.verified }
+            }
+            setMessages((prev) => prev.map((x) => x.id === updated.id ? { ...x, ...updated } : x))
+          }
+          handleEdit()
         }
       } else if (msg.type === 'message_deleted') {
         const m = msg.payload as Message
@@ -520,30 +559,45 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
           })
         }
       } else if (msg.type === 'member_joined' || msg.type === 'member_left' || msg.type === 'member_kicked') {
-        // Membership changed — rotation is handled globally in Home.tsx.
-        // Just re-check our encryption state in case keys were rotated.
+        // Membership changed — rotation is handled globally in Home.tsx (which sends channel_keys_updated).
+        // Just re-check encryption state after a delay to pick up the new epoch.
+        // Do NOT clear keys here — the channel_keys_updated handler will load new epoch additively.
         if (encrypted && channel.server_id) {
           const p = msg.payload as { server_id: string }
           if (p.server_id === channel.server_id) {
-            e2e.clearChannelKey(channel.id)
-            e2e.getChannelKey(channel.id).then((key) => {
-              if (key) setEncryptionReady(true)
-            })
+            setTimeout(() => {
+              e2e.getChannelKey(channel.id, true).then((key) => {
+                if (key) setEncryptionReady(true)
+              })
+            }, 3000)
           }
         }
       } else if (msg.type === 'channel_keys_updated') {
-        // Another client distributed a key for this channel — fetch key directly
-        // (don't call checkEncryption to avoid sending another key_request)
+        // A key was distributed for this channel — try loading the notified epoch directly.
+        // Do NOT clear the channel key cache — just load the new epoch additively.
+        // This avoids nuking existing keys when multiple notifications arrive during distribution.
         const p = msg.payload as { channel_id: string; epoch: number }
         if (p.channel_id === channel.id) {
           console.log('%c[E2E]', 'color: #00e0ff; font-weight: bold', `Key update notification: channel=${channel.id.slice(0,8)}… epoch=${p.epoch}`)
-          e2e.clearChannelKey(channel.id)
-          e2e.getChannelKey(channel.id).then((key) => {
-            if (key) {
-              setEncryptionReady(true)
-              setEncrypted(true)
-            }
-          }).catch(() => {})
+          // Retry with increasing delays — distribution to many devices can take 10+ seconds.
+          const tryLoadEpoch = (attempt: number) => {
+            e2e.invalidateCachedEpoch(channel.id, p.epoch)
+            e2e.getChannelKeyForEpoch(channel.id, p.epoch).then((key) => {
+              if (key) {
+                setEncryptionReady(true)
+                setEncrypted(true)
+                // Trigger re-decryption of any [encrypted — missing key] messages
+                setReDecryptTrigger(n => n + 1)
+              } else if (attempt < 10) {
+                setTimeout(() => tryLoadEpoch(attempt + 1), 2000)
+              } else {
+                // Exhausted retries — ask peers to redistribute the key
+                console.log('%c[E2E]', 'color: #ffaa00; font-weight: bold', `Key load failed after ${attempt} attempts — sending key_request`)
+                send('key_request', { channel_id: channel.id })
+              }
+            }).catch(() => {})
+          }
+          tryLoadEpoch(1)
         }
       }
     })
@@ -594,8 +648,8 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
               ordered.map(async (m) => {
                 seenMsgIds.current.add(m.id)
                 if (e2e.isEncryptedContent(m.content)) {
-                  const plain = await e2e.decryptMessage(channel.id, m.content, m.key_epoch)
-                  return { ...m, content: plain }
+                  const result = await e2e.decryptMessage(channel.id, m.content, m.key_epoch, undefined, true)
+                  return { ...m, content: result.text, verified: result.verified }
                 }
                 return m
               })
@@ -628,8 +682,8 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
       const decrypted = await Promise.all(
         results.map(async (m) => {
           if (e2e.isEncryptedContent(m.content)) {
-            const plain = await e2e.decryptMessage(channel.id, m.content, m.key_epoch)
-            return { ...m, content: plain }
+            const result = await e2e.decryptMessage(channel.id, m.content, m.key_epoch, undefined, true)
+            return { ...m, content: result.text, verified: result.verified }
           }
           return m
         })
@@ -736,15 +790,27 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     let keyEpoch = 0
     if (encrypted) {
       if (!encryptionReady) {
-        // No key yet — rotate to a new epoch so this device can participate
-        const rotated = await e2e.rotateKeys(channel.id)
-        if (!rotated) {
-          alert('Failed to create encryption key. Please try again.')
-          return
+        // No key yet — try to fetch it first (another client may have distributed it)
+        const freshKey = await e2e.getChannelKey(channel.id, true)
+        if (freshKey) {
+          setEncryptionReady(true)
+        } else {
+          // Still no key — rotate to a new epoch so this device can participate
+          const rotated = await e2e.rotateKeys(channel.id)
+          if (!rotated) {
+            alert('Failed to create encryption key. Please try again.')
+            return
+          }
+          setEncryptionReady(true)
         }
-        setEncryptionReady(true)
       }
-      const enc = await e2e.encryptMessage(channel.id, content)
+      let enc = await e2e.encryptMessage(channel.id, content)
+      if (!enc) {
+        // Retry once: invalidate cache and reload key from server
+        e2e.invalidateCachedEpoch(channel.id, await e2e.getCurrentEpoch(channel.id))
+        const retryKey = await e2e.getChannelKey(channel.id, true)
+        if (retryKey) enc = await e2e.encryptMessage(channel.id, content)
+      }
       if (!enc) {
         alert('Failed to encrypt message. Send aborted to protect your privacy.')
         return
@@ -793,9 +859,16 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     sendDeleteMessage(m.id)
   }
 
-  const handleInlineEditSave = () => {
+  const handleInlineEditSave = async () => {
     if (editingMsg && inlineEditText.trim()) {
-      sendEditMessage(editingMsg.id, inlineEditText.trim())
+      let content = inlineEditText.trim()
+      if (encrypted) {
+        const enc = await e2e.encryptMessage(channel.id, content)
+        if (enc) {
+          content = enc.encrypted
+        }
+      }
+      sendEditMessage(editingMsg.id, content)
     }
     setEditingMsg(null)
     setInlineEditText('')
@@ -1107,6 +1180,12 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                 ) : (
                   <div className="message-body">
                     {renderMessageContent(m.content, user?.username)}
+                    {m.verified === false && (
+                      <span className="sig-badge sig-bad" title="Signature verification failed">⚠</span>
+                    )}
+                    {m.verified === true && (
+                      <span className="sig-badge sig-ok" title="Signature verified">🔒</span>
+                    )}
                     {m.edited && (
                       <span
                         className="edited-badge"

@@ -158,6 +158,14 @@ export const getChannelDevices = (channelId: string) =>
 // Channel epoch (E2E — current key epoch)
 export const getChannelEpoch = (channelId: string) =>
   request<{ epoch: number }>('GET', `/channels/${encodeURIComponent(channelId)}/epoch`)
+export const claimEpoch = (channelId: string, device_id: string, epoch: number) =>
+  request<{ epoch: number; claimed: boolean }>('POST', `/channels/${encodeURIComponent(channelId)}/claim-epoch`, { device_id, epoch })
+
+// Master keys (per-device encrypted epoch keys — server never sees raw keys)
+export const getMasterKeys = (channelId: string) =>
+  request<ChannelKey[]>('GET', `/channels/${encodeURIComponent(channelId)}/master-keys`)
+export const setMasterKeys = (channelId: string, epoch: number, keys: { device_id: string; encrypted_key: string }[]) =>
+  request<void>('POST', `/channels/${encodeURIComponent(channelId)}/master-keys`, { epoch, keys })
 
 // Devices (per-device E2E keys)
 export const registerDevice = (public_key: string, name = '', signing_key = '') =>
@@ -168,6 +176,12 @@ export const deleteDevice = (deviceId: string) =>
   request<void>('DELETE', `/devices/${encodeURIComponent(deviceId)}`)
 export const getUserDevices = (userId: string) =>
   request<Device[]>('GET', `/users/${encodeURIComponent(userId)}/devices`)
+export const getPendingDevices = () =>
+  request<Device[]>('GET', '/devices/pending')
+export const approveDevice = (deviceId: string) =>
+  request<void>('POST', `/devices/${encodeURIComponent(deviceId)}/approve`)
+export const rejectDevice = (deviceId: string) =>
+  request<void>('DELETE', `/devices/${encodeURIComponent(deviceId)}/reject`)
 
 // File upload
 const MAX_UPLOAD_MB = 50

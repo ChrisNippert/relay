@@ -53,6 +53,14 @@ func (db *DB) migrate() error {
 		`ALTER TABLE devices ADD COLUMN signing_key TEXT DEFAULT ''`,
 		// Migrate channel_keys to add epoch column if missing
 		`ALTER TABLE channel_keys ADD COLUMN epoch INTEGER DEFAULT 0`,
+		// Device approval: new devices require approval from an existing device
+		`ALTER TABLE devices ADD COLUMN approved INTEGER DEFAULT 1`,
+		// Epoch claim table for preventing split-brain key rotation races
+		`CREATE TABLE IF NOT EXISTS epoch_claims (channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE, epoch INTEGER NOT NULL, device_id TEXT NOT NULL, claimed_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (channel_id, epoch))`,
+		// Master key table v1 (plaintext) — drop if it exists from a previous migration.
+		`DROP TABLE IF EXISTS channel_master_keys`,
+		// Master key table v2: per-device encrypted copies. Server never sees raw keys.
+		`CREATE TABLE IF NOT EXISTS channel_master_keys (channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE, epoch INTEGER NOT NULL, device_id TEXT NOT NULL, encrypted_key TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (channel_id, epoch, device_id))`,
 	}
 	for _, stmt := range alterations {
 		db.Exec(stmt) // intentionally ignore "duplicate column" errors
@@ -201,6 +209,14 @@ CREATE TABLE IF NOT EXISTS channel_keys (
     encrypted_key TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (channel_id, device_id, epoch)
+);
+
+CREATE TABLE IF NOT EXISTS epoch_claims (
+    channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    epoch INTEGER NOT NULL,
+    device_id TEXT NOT NULL,
+    claimed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (channel_id, epoch)
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, created_at);

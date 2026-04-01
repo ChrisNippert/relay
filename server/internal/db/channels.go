@@ -198,3 +198,26 @@ func (db *DB) IsChannelParticipant(channelID, userID string) (bool, error) {
 
 	return db.IsServerMember(channel.ServerID, userID)
 }
+
+// GetChannelParticipantIDs returns all user IDs that are members of a channel
+// (DM participants or server members depending on channel type).
+func (db *DB) GetChannelParticipantIDs(channelID string) ([]string, error) {
+	channel, err := db.GetChannel(channelID)
+	if err != nil {
+		return nil, err
+	}
+
+	if channel.Type == "dm" {
+		return db.GetDMParticipants(channelID)
+	}
+
+	members, err := db.GetServerMembers(channel.ServerID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(members))
+	for i, m := range members {
+		ids[i] = m.UserID
+	}
+	return ids, nil
+}

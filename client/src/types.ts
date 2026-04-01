@@ -60,6 +60,7 @@ export interface Message {
   edited: boolean
   deleted?: boolean
   key_epoch: number
+  verified?: boolean | null
   created_at: string
   updated_at: string
   attachments?: Attachment[]
@@ -96,6 +97,7 @@ export interface Device {
   name: string
   public_key: string
   signing_key: string
+  approved: boolean
   created_at: string
 }
 

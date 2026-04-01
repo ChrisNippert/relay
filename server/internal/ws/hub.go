@@ -50,6 +50,9 @@ func (h *Hub) Run() {
 				h.broadcastPresence(client.userID, "online")
 			}
 
+			// Send the connecting client current online status of related users
+			h.sendPresenceSync(client)
+
 		case client := <-h.unregister:
 			h.mu.Lock()
 			conns := h.clients[client.userID]
@@ -89,6 +92,31 @@ func (h *Hub) broadcastPresence(userID, status string) {
 
 	for _, peerID := range peerIDs {
 		for client := range h.clients[peerID] {
+			select {
+			case client.send <- data:
+			default:
+			}
+		}
+	}
+}
+
+// sendPresenceSync sends the connecting client the online status of all related users.
+func (h *Hub) sendPresenceSync(client *Client) {
+	peerIDs := h.getRelatedUserIDs(client.userID)
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for _, peerID := range peerIDs {
+		if len(h.clients[peerID]) > 0 {
+			msg := WSMessage{
+				Type: "presence",
+				Payload: json.RawMessage(mustMarshal(map[string]string{
+					"user_id": peerID,
+					"status":  "online",
+				})),
+			}
+			data := mustMarshal(msg)
 			select {
 			case client.send <- data:
 			default:

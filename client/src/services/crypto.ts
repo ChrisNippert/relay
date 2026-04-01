@@ -169,6 +169,37 @@ export async function verify(publicKeyBase64: string, data: string, signatureBas
   )
 }
 
+// HKDF-SHA256: derive a key from input keying material with info string
+export async function hkdf(ikm: ArrayBuffer, salt: ArrayBuffer, info: string, length: number = 32): Promise<ArrayBuffer> {
+  const key = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits'])
+  return crypto.subtle.deriveBits(
+    { name: 'HKDF', hash: 'SHA-256', salt, info: new TextEncoder().encode(info) },
+    key,
+    length * 8
+  )
+}
+
+// Derive the initial chain key for a sender in a given epoch
+// chainKey_0 = HKDF(epochRootKey, deviceId, "sender-chain-init")
+export async function deriveChainKey(epochKey: CryptoKey, deviceId: string): Promise<ArrayBuffer> {
+  const ikm = await crypto.subtle.exportKey('raw', epochKey)
+  const salt = new TextEncoder().encode(deviceId).buffer as ArrayBuffer
+  return hkdf(ikm, salt, 'sender-chain-init')
+}
+
+// Derive a message key from the current chain key
+// messageKey = HKDF(chainKey, empty salt, "message-key")
+export async function deriveMessageKey(chainKey: ArrayBuffer): Promise<CryptoKey> {
+  const derived = await hkdf(chainKey, new Uint8Array(32).buffer as ArrayBuffer, 'message-key')
+  return crypto.subtle.importKey('raw', derived, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
+}
+
+// Advance the chain key
+// chainKey_{N+1} = HKDF(chainKey_N, empty salt, "chain-advance")
+export async function advanceChainKey(chainKey: ArrayBuffer): Promise<ArrayBuffer> {
+  return hkdf(chainKey, new Uint8Array(32).buffer as ArrayBuffer, 'chain-advance')
+}
+
 // Helpers
 function bufToBase64(buf: ArrayBuffer): string {
   return btoa(String.fromCharCode(...new Uint8Array(buf)))

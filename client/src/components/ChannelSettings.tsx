@@ -33,7 +33,6 @@ export default function ChannelSettings({ channel, onClose, onChannelUpdated, on
 
   // Delete
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const [deleteInput, setDeleteInput] = useState('')
 
   useEffect(() => {
     e2e.isChannelEncrypted(channel.id).then(setEncrypted).catch(() => setEncrypted(false))
@@ -78,7 +77,6 @@ export default function ChannelSettings({ channel, onClose, onChannelUpdated, on
   }
 
   const handleDelete = async () => {
-    if (deleteInput !== channel.name) return
     try {
       await api.deleteChannel(channel.id)
       onChannelDeleted()
@@ -186,28 +184,18 @@ export default function ChannelSettings({ channel, onClose, onChannelUpdated, on
           <div className="settings-actions">
             <h3 className="settings-section">Danger Zone</h3>
             {!showDeleteConfirm ? (
-              <button className="danger-btn" onClick={() => { setShowDeleteConfirm(true); setDeleteInput('') }}>
+              <button className="danger-btn" onClick={() => setShowDeleteConfirm(true)}>
                 Delete Channel
               </button>
             ) : (
               <div className="ch-settings-delete-confirm">
                 <p className="ch-settings-enc-desc">
-                  Type <strong>{channel.name}</strong> to confirm deletion. This cannot be undone.
+                  Are you sure you want to delete <strong>#{channel.name}</strong>? This cannot be undone.
                 </p>
-                <input
-                  type="text"
-                  className="ch-settings-confirm-input"
-                  value={deleteInput}
-                  onChange={(e) => setDeleteInput(e.target.value)}
-                  placeholder={`Type ${channel.name}`}
-                  autoFocus
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleDelete() }}
-                />
                 <div className="ch-settings-confirm-actions">
                   <button
                     className="danger-btn"
                     onClick={handleDelete}
-                    disabled={deleteInput !== channel.name}
                   >
                     Delete #{channel.name}
                   </button>

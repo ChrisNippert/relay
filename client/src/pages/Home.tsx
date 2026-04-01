@@ -27,6 +27,7 @@ export default function Home() {
   const [dmChannels, setDmChannels] = useState<Channel[]>([])
   const [view, setView] = useState<'server' | 'dm'>('dm')
   const selectedChannelRef = useRef<Channel | null>(null)
+  const userIdRef = useRef(user?.id)
   const [showSettings, setShowSettings] = useState(false)
   const [showServerSettings, setShowServerSettings] = useState(false)
   const [dmCall, setDmCall] = useState<{ userId: string; name: string; channelId: string; video: boolean; incomingOffer?: RTCSessionDescriptionInit } | null>(null)
@@ -112,6 +113,9 @@ export default function Home() {
     return unsub
   }, [user?.id, dmCall, activeVoiceChannel?.id])
 
+  // Keep userIdRef in sync
+  useEffect(() => { userIdRef.current = user?.id }, [user?.id])
+
   // Global handler: when another device requests an encryption key, rotate to a new epoch.
   // This preserves forward secrecy — new users get only the new key, not old epoch keys.
   // Debounced per-channel to prevent multiple clients all rotating at once.
@@ -132,13 +136,18 @@ export default function Home() {
             const last = recentRotations.get(p.channel_id) ?? 0
             if (Date.now() - last < COOLDOWN) return
             recentRotations.set(p.channel_id, Date.now())
-            console.log('%c[E2E]', 'color: #00e0ff; font-weight: bold', `Global key_request: rotating keys for channel ${p.channel_id.slice(0,8)}\u2026`)
-            e2e.rotateKeys(p.channel_id)
+            // Redistribute the current epoch key to any devices that are missing it.
+            // Do NOT rotate — the requesting device already self-rotated. Creating a
+            // new epoch would cascade into competing distributions and epoch churn.
+            console.log('%c[E2E]', 'color: #00e0ff; font-weight: bold', `Global key_request: redistributing key for channel ${p.channel_id.slice(0,8)}…`)
+            e2e.redistributeToAll(p.channel_id)
           }
         }).catch(() => {})
-      } else if (msg.type === 'member_joined' || msg.type === 'member_left' || msg.type === 'member_kicked') {
-        // Rotate keys for ALL encrypted channels in the server when membership changes.
-        // This ensures forward secrecy even when nobody is viewing the encrypted channel.
+      } else if (msg.type === 'member_left' || msg.type === 'member_kicked') {
+        // Rotate keys for ALL encrypted channels in the server when a member LEAVES.
+        // This ensures forward secrecy — departed members can't decrypt future messages.
+        // NOTE: member_joined does NOT trigger rotation — the joining user self-rotates
+        // via checkEncryption in ChatView, avoiding a split-brain key race.
         const p = msg.payload as { server_id: string; user_id: string }
         if (!p.server_id) return
         api.getChannels(p.server_id).then(async (chs) => {
@@ -274,7 +283,11 @@ export default function Home() {
       if (!serverID || serverID !== selectedServer?.id) return
 
       if (msg.type === 'channel_created') {
-        setChannels((prev) => [...prev, payload as unknown as Channel])
+        setChannels((prev) => {
+          const ch = payload as unknown as Channel
+          if (prev.some((c) => c.id === ch.id)) return prev
+          return [...prev, ch]
+        })
       } else if (msg.type === 'channel_updated') {
         setChannels((prev) => prev.map((c) => c.id === (payload as { id: string }).id ? (payload as unknown as Channel) : c))
       } else if (msg.type === 'channel_deleted') {
