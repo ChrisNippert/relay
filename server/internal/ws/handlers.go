@@ -412,6 +412,15 @@ func handleVoiceJoin(c *Client, payload json.RawMessage) {
 		c.hub.SendToChannel(chID, mustMarshal(endMsg), c.userID)
 	}
 
+	// Force disconnect other devices/sessions from voice
+	forceMsg := WSMessage{
+		Type: "voice_force_disconnect",
+		Payload: json.RawMessage(mustMarshal(map[string]interface{}{
+			"reason": "joined_from_another_device",
+		})),
+	}
+	c.hub.SendToUserExcept(c.userID, mustMarshal(forceMsg), c)
+
 	users := c.hub.VoiceJoin(p.ChannelID, c.userID)
 
 	// Broadcast updated voice state to the channel

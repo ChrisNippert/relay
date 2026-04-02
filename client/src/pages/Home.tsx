@@ -45,6 +45,7 @@ export default function Home() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [showMembers, setShowMembers] = useState(true)
   const [channelSidebarCollapsed, setChannelSidebarCollapsed] = useState(false)
+  const [serverSidebarCollapsed, setServerSidebarCollapsed] = useState(false)
   const [unreadChannels, setUnreadChannels] = useState<Record<string, { count: number; mentioned: boolean; serverId?: string }>>({})
   const [dmNames, setDmNames] = useState<Record<string, string>>({})
   const channelServerMapRef = useRef<Record<string, string>>({})
@@ -578,6 +579,8 @@ export default function Home() {
           })
         }}
         serverUnreads={serverUnreads}
+        collapsed={serverSidebarCollapsed}
+        onToggleCollapse={() => setServerSidebarCollapsed((p) => !p)}
       />
 
       <div className={`channel-sidebar ${channelSidebarCollapsed ? 'collapsed' : ''}`}>

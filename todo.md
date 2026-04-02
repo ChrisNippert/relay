@@ -1,10 +1,7 @@
 # BUGS
-* names in voice channel sideview move when lighting up since it grows and it's left aligned. Make it so it grows but does not move the text.
-    * This has become worse as I am not at all showing up in a voice chat on the side panel when i join it.
 
 * Images in encrypted channels are not encrypted
 * Sometimes image upload fails with html 413 error: <html> <head><title>413 Request Entity Too Large</title></head> <body> <center><h1>413 Request Entity Too Large</h1></center> <hr><center>nginx/1.24.0 (Ubuntu)</center> </body> </html>, and subsequent uploads take infinitely long. For reference the file is 9MB, so not at the limit. Switching channels seems to reset the infinite upload issue
-* For sometimes the noise gate threshold test microphone doesn't show a green bar. Can we always show the green bar even without the test microphone on?
 * Can't join from another device to replace current voice chat join (maybe)
 * When passing a file over the main window and going to some other window, it pops up "drop files here" and doesn't go away until i leave the servers page.
 * Sometimes when people join a voice chat, I get calling notifications
@@ -19,8 +16,6 @@
 
 # UI QOL
 * DM Notifications should pop up 
-* Take server out of login screen for now until we want to do federation
-* Along with this, make users not have images or circles since we won't have profile pictures. It's supposed to have that old IRC/forum aesthetic
 
 
 # TODOs later
@@ -58,3 +53,9 @@
 * The shrink members button doesn't appear on the voice chat page. please make this happen 
 * Server bar notificaions
 * Change server bar on the left to be names instead of squares to be less like discord. Also for new DMs, show the name beneath the DM tab, but above all the servers.
+
+* names in voice channel sideview move when lighting up since it grows and it's left aligned. Make it so it grows but does not move the text.
+* For sometimes the noise gate threshold test microphone doesn't show a green bar. Can we always show the green bar even without the test microphone on?
+
+* Take server out of login screen for now until we want to do federation
+* Along with this, make users not have images or circles since we won't have profile pictures. It's supposed to have that old IRC/forum aesthetic

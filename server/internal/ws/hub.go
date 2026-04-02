@@ -181,6 +181,22 @@ func (h *Hub) SendToUser(userID string, data []byte) {
 	}
 }
 
+// SendToUserExcept sends to all connections for a user except the specified client.
+func (h *Hub) SendToUserExcept(userID string, data []byte, except *Client) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for client := range h.clients[userID] {
+		if client == except {
+			continue
+		}
+		select {
+		case client.send <- data:
+		default:
+		}
+	}
+}
+
 // SendToServer sends a message to all connected members of a server.
 func (h *Hub) SendToServer(serverID string, data []byte) {
 	members, err := h.db.GetServerMembers(serverID)

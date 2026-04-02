@@ -147,6 +147,11 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
             prev.map((u) => u.id === payload.user_id ? { ...u, muted: payload.muted, deafened: payload.deafened } : u)
           )
         }
+      } else if (msg.type === 'voice_force_disconnect') {
+        // Another device took over voice — clean up locally without notifying server
+        if (peersRef.current.size > 0 || localStreamRef.current) {
+          forceLeaveVoice()
+        }
       }
     })
     return unsub
@@ -299,21 +304,28 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       // High-pass filter to remove low-frequency rumble (keyboard, mouse clicks, desk vibrations)
       const highpass = ctx.createBiquadFilter()
       highpass.type = 'highpass'
-      highpass.frequency.value = 80
+      highpass.frequency.value = 100
       highpass.Q.value = 0.7
       source.connect(highpass)
+
+      // Low-pass filter to remove high-frequency hiss and artifacts
+      const lowpass = ctx.createBiquadFilter()
+      lowpass.type = 'lowpass'
+      lowpass.frequency.value = 7500
+      lowpass.Q.value = 0.7
+      highpass.connect(lowpass)
 
       const analyser = ctx.createAnalyser()
       analyser.fftSize = 512
       analyser.smoothingTimeConstant = 0.6
-      highpass.connect(analyser)
+      lowpass.connect(analyser)
       analyserRef.current = analyser
 
       // Always set up noise gate chain (gain node) so it can be toggled dynamically
       const gain = ctx.createGain()
       gain.gain.value = 1
       gainNodeRef.current = gain
-      highpass.connect(gain)
+      lowpass.connect(gain)
       const dest = ctx.createMediaStreamDestination()
       gain.connect(dest)
       // Replace the audio track in the stream and all peer connections
@@ -816,6 +828,38 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     if (localScreenRef.current) localScreenRef.current.srcObject = null
 
     sendVoiceLeave(channel.id)
+
+    setJoined(false)
+    setVoiceUsers([])
+    setRemoteStreams(new Map())
+    setRemoteScreenStreams(new Map())
+    primaryStreamIds.current.clear()
+    setMuted(false)
+    setDeafened(false)
+    setVideoOn(false)
+    setScreenSharing(false)
+    playDisconnectedSound()
+    onLeave?.()
+  }
+
+  // Force disconnect without notifying server (another device took over)
+  function forceLeaveVoice() {
+    for (const [, pc] of peersRef.current) {
+      pc.close()
+    }
+    peersRef.current.clear()
+
+    stopVoiceActivityDetection()
+    stopAllRemoteVAD()
+
+    localStreamRef.current?.getTracks().forEach((t) => t.stop())
+    localStreamRef.current = null
+    screenStreamRef.current?.getTracks().forEach((t) => t.stop())
+    screenStreamRef.current = null
+
+    if (remoteAudioRef.current) remoteAudioRef.current.innerHTML = ''
+    if (localVideoRef.current) localVideoRef.current.srcObject = null
+    if (localScreenRef.current) localScreenRef.current.srcObject = null
 
     setJoined(false)
     setVoiceUsers([])

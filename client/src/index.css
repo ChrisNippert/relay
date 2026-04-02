@@ -209,6 +209,8 @@ html, body, #root {
   border-right: 1px solid var(--border);
   flex-shrink: 0;
   overflow-y: auto;
+  transition: width 0.2s ease;
+  overflow-x: hidden;
 }
 
 .server-nav-item {
@@ -299,6 +301,53 @@ html, body, #root {
   height: 1px;
   background: var(--border);
   border-radius: 1px;
+}
+
+/* Server list collapsed */
+.server-list.collapsed {
+  width: 48px;
+  align-items: center;
+}
+
+.server-list.collapsed .server-nav-item {
+  justify-content: center;
+  padding: 8px 4px;
+  position: relative;
+}
+
+.server-list.collapsed .server-nav-label {
+  display: none;
+}
+
+.server-nav-letter {
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.server-list.collapsed .server-nav-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font-size: 0.55rem;
+}
+
+.server-list.collapsed .server-divider {
+  width: calc(100% - 8px);
+  margin: 4px;
+}
+
+.server-collapse-btn {
+  margin-top: auto !important;
+  color: var(--text-muted) !important;
+  font-size: 1.1rem !important;
+  opacity: 0.6;
+}
+
+.server-collapse-btn:hover {
+  opacity: 1;
 }
 
 /* Channel Sidebar */

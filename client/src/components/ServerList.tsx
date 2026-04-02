@@ -19,11 +19,13 @@ interface Props {
   unreadDMs?: DMEntry[]
   onSelectDM?: (channel: Channel) => void
   serverUnreads?: Record<string, { count: number; mentioned: boolean }>
+  collapsed?: boolean
+  onToggleCollapse?: () => void
 }
 
 export type { DMEntry }
 
-export default function ServerList({ servers, selected, onSelect, onDMs, onCreate, isDMView, onJoinByCode, unreadDMs, onSelectDM, serverUnreads }: Props) {
+export default function ServerList({ servers, selected, onSelect, onDMs, onCreate, isDMView, onJoinByCode, unreadDMs, onSelectDM, serverUnreads, collapsed, onToggleCollapse }: Props) {
   const [showModal, setShowModal] = useState<'create' | 'join' | null>(null)
   const [serverName, setServerName] = useState('')
   const [joinCode, setJoinCode] = useState('')
@@ -45,16 +47,16 @@ export default function ServerList({ servers, selected, onSelect, onDMs, onCreat
   }
 
   return (
-    <div className="server-list">
+    <div className={`server-list ${collapsed ? 'collapsed' : ''}`}>
       <button
         className={`server-nav-item dm-btn ${isDMView ? 'active' : ''}`}
         onClick={onDMs}
         title="Direct Messages"
       >
-        <span className="server-nav-label">DMs</span>
+        {collapsed ? <span className="server-nav-letter">DM</span> : <span className="server-nav-label">DMs</span>}
       </button>
 
-      {unreadDMs && unreadDMs.length > 0 && (
+      {unreadDMs && unreadDMs.length > 0 && !collapsed && (
         <>
           {unreadDMs.map((dm) => (
             <button
@@ -81,7 +83,10 @@ export default function ServerList({ servers, selected, onSelect, onDMs, onCreat
             onClick={() => onSelect(s)}
             title={s.name}
           >
-            <span className="server-nav-label">{s.name}</span>
+            {collapsed
+              ? <span className="server-nav-letter">{s.name.charAt(0).toUpperCase()}</span>
+              : <span className="server-nav-label">{s.name}</span>
+            }
             {unreads && unreads.count > 0 && (
               <span className={`server-nav-badge ${unreads.mentioned ? 'mentioned' : ''}`}>{unreads.count}</span>
             )}
@@ -92,6 +97,12 @@ export default function ServerList({ servers, selected, onSelect, onDMs, onCreat
       <button className="server-nav-item add" onClick={() => setShowModal('create')} title="Create or Join Server">
         +
       </button>
+
+      {onToggleCollapse && (
+        <button className="server-nav-item server-collapse-btn" onClick={onToggleCollapse} title={collapsed ? 'Expand' : 'Collapse'}>
+          {collapsed ? '»' : '«'}
+        </button>
+      )}
 
       {showModal && (
         <div className="server-modal-overlay" onClick={() => setShowModal(null)}>

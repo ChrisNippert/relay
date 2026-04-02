@@ -1045,18 +1045,43 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
       setDragging(false)
     }
     const handleDocDragLeave = (e: DragEvent) => {
-      // Only reset if dragging out of the window (relatedTarget is null)
       if (e.relatedTarget === null && (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight)) {
         resetDrag()
       }
     }
+    // Detect when a drag operation has left the window entirely:
+    // If no dragover fires for 200ms while we think we're dragging, reset.
+    let lastDragOver = 0
+    let dragCheckInterval: ReturnType<typeof setInterval> | null = null
+    const stopDragCheck = () => {
+      if (dragCheckInterval) { clearInterval(dragCheckInterval); dragCheckInterval = null }
+    }
+    const handleDocDragOver = () => {
+      lastDragOver = Date.now()
+      if (!dragCheckInterval) {
+        dragCheckInterval = setInterval(() => {
+          if (Date.now() - lastDragOver > 200) {
+            resetDrag()
+            stopDragCheck()
+          }
+        }, 100)
+      }
+    }
+    const handleVisibilityChange = () => {
+      if (document.hidden) resetDrag()
+    }
     window.addEventListener('blur', resetDrag)
     document.addEventListener('dragleave', handleDocDragLeave)
     document.addEventListener('dragend', resetDrag)
+    document.addEventListener('dragover', handleDocDragOver)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => {
       window.removeEventListener('blur', resetDrag)
       document.removeEventListener('dragleave', handleDocDragLeave)
       document.removeEventListener('dragend', resetDrag)
+      document.removeEventListener('dragover', handleDocDragOver)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      stopDragCheck()
     }
   }, [])
 
