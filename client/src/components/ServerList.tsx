@@ -1,5 +1,12 @@
 import { useState } from 'react'
-import type { Server } from '../types'
+import type { Server, Channel } from '../types'
+
+interface DMEntry {
+  channel: Channel
+  name: string
+  unread: number
+  mentioned: boolean
+}
 
 interface Props {
   servers: Server[]
@@ -9,9 +16,14 @@ interface Props {
   onCreate: (name: string) => void
   isDMView: boolean
   onJoinByCode: (code: string) => void
+  unreadDMs?: DMEntry[]
+  onSelectDM?: (channel: Channel) => void
+  serverUnreads?: Record<string, { count: number; mentioned: boolean }>
 }
 
-export default function ServerList({ servers, selected, onSelect, onDMs, onCreate, isDMView, onJoinByCode }: Props) {
+export type { DMEntry }
+
+export default function ServerList({ servers, selected, onSelect, onDMs, onCreate, isDMView, onJoinByCode, unreadDMs, onSelectDM, serverUnreads }: Props) {
   const [showModal, setShowModal] = useState<'create' | 'join' | null>(null)
   const [serverName, setServerName] = useState('')
   const [joinCode, setJoinCode] = useState('')
@@ -35,31 +47,49 @@ export default function ServerList({ servers, selected, onSelect, onDMs, onCreat
   return (
     <div className="server-list">
       <button
-        className={`server-icon ${isDMView ? 'active' : ''}`}
+        className={`server-nav-item dm-btn ${isDMView ? 'active' : ''}`}
         onClick={onDMs}
         title="Direct Messages"
       >
-        DM
+        <span className="server-nav-label">DMs</span>
       </button>
+
+      {unreadDMs && unreadDMs.length > 0 && (
+        <>
+          {unreadDMs.map((dm) => (
+            <button
+              key={dm.channel.id}
+              className="server-nav-item dm-unread-item"
+              onClick={() => onSelectDM?.(dm.channel)}
+              title={dm.name}
+            >
+              <span className="server-nav-label">{dm.name}</span>
+              <span className={`server-nav-badge ${dm.mentioned ? 'mentioned' : ''}`}>{dm.unread}</span>
+            </button>
+          ))}
+        </>
+      )}
 
       <div className="server-divider" />
 
-      {servers.map((s) => (
-        <button
-          key={s.id}
-          className={`server-icon ${selected?.id === s.id ? 'active' : ''}`}
-          onClick={() => onSelect(s)}
-          title={s.name}
-        >
-          {s.icon_url ? (
-            <img src={s.icon_url} alt="" className="server-icon-img" />
-          ) : (
-            s.name.charAt(0).toUpperCase()
-          )}
-        </button>
-      ))}
+      {servers.map((s) => {
+        const unreads = serverUnreads?.[s.id]
+        return (
+          <button
+            key={s.id}
+            className={`server-nav-item ${selected?.id === s.id ? 'active' : ''}`}
+            onClick={() => onSelect(s)}
+            title={s.name}
+          >
+            <span className="server-nav-label">{s.name}</span>
+            {unreads && unreads.count > 0 && (
+              <span className={`server-nav-badge ${unreads.mentioned ? 'mentioned' : ''}`}>{unreads.count}</span>
+            )}
+          </button>
+        )
+      })}
 
-      <button className="server-icon add" onClick={() => setShowModal('create')} title="Create or Join Server">
+      <button className="server-nav-item add" onClick={() => setShowModal('create')} title="Create or Join Server">
         +
       </button>
 

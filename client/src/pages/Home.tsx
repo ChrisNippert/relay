@@ -4,9 +4,11 @@ import * as api from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import { subscribe, sendVoiceKick } from '../services/ws'
 import { playMessageSound, playCallRing } from '../services/sounds'
+import { getSettings } from '../services/settings'
 import * as e2e from '../services/e2e'
 import { setICEConfig } from '../services/webrtc'
 import ServerList from '../components/ServerList'
+import type { DMEntry } from '../components/ServerList'
 import ChannelList from '../components/ChannelList'
 import type { VoicePresenceUser } from '../components/ChannelList'
 import ChatView from '../components/ChatView'
@@ -42,8 +44,54 @@ export default function Home() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [showMembers, setShowMembers] = useState(true)
   const [channelSidebarCollapsed, setChannelSidebarCollapsed] = useState(false)
-  const [unreadChannels, setUnreadChannels] = useState<Record<string, { count: number; mentioned: boolean }>>({})
+  const [unreadChannels, setUnreadChannels] = useState<Record<string, { count: number; mentioned: boolean; serverId?: string }>>({})
+  const [dmNames, setDmNames] = useState<Record<string, string>>({})
+  const channelServerMapRef = useRef<Record<string, string>>({})
 
+  // Populate channel→server mapping when servers load
+  useEffect(() => {
+    servers.forEach((s) => {
+      api.getChannels(s.id).then((chs) => {
+        chs.forEach((ch) => {
+          channelServerMapRef.current[ch.id] = s.id
+        })
+      }).catch(() => {})
+    })
+  }, [servers])
+
+  // Resolve DM participant names for sidebar display
+  useEffect(() => {
+    if (!user) return
+    dmChannels.forEach((ch) => {
+      if (dmNames[ch.id]) return
+      api.getDMParticipants(ch.id).then(async (ids: string[]) => {
+        const otherId = ids.find((id) => id !== user.id) || ids[0]
+        if (!otherId) return
+        const u = await api.getUser(otherId)
+        setDmNames((prev) => ({ ...prev, [ch.id]: u.display_name }))
+      }).catch(() => {})
+    })
+  }, [dmChannels, user])
+
+  // Compute unread DMs for server bar
+  const unreadDMs: DMEntry[] = dmChannels
+    .filter((ch) => unreadChannels[ch.id] && unreadChannels[ch.id].count > 0)
+    .map((ch) => ({
+      channel: ch,
+      name: dmNames[ch.id] || ch.name || '?',
+      unread: unreadChannels[ch.id]!.count,
+      mentioned: unreadChannels[ch.id]!.mentioned,
+    }))
+
+  // Aggregate channel-level unreads into server-level unreads
+  const serverUnreads: Record<string, { count: number; mentioned: boolean }> = {}
+  for (const [, u] of Object.entries(unreadChannels)) {
+    const serverId = u.serverId
+    if (!serverId) continue
+    if (!serverUnreads[serverId]) serverUnreads[serverId] = { count: 0, mentioned: false }
+    serverUnreads[serverId].count += u.count
+    if (u.mentioned) serverUnreads[serverId].mentioned = true
+  }
   // Poll voice ref state to keep sidebar controls in sync
   const syncVoiceControls = useCallback(() => {
     if (voiceRef.current) {
@@ -85,12 +133,29 @@ export default function Home() {
       if (msg.type === 'chat_message') {
         const m = msg.payload as Message
         if (m.user_id !== user?.id && (m.channel_id !== selectedChannelRef.current?.id || document.hidden)) {
-          playMessageSound()
           // Track unread
           const mentioned = !!(user?.username && new RegExp(`@${user.username}\\b`, 'i').test(m.content))
+          const isDM = !channelServerMapRef.current[m.channel_id]
+
+          // Play sound based on notification settings
+          const notifSettings = getSettings()
+          const shouldPlaySound =
+            (mentioned && notifSettings.notifyMentions) ||
+            (isDM && notifSettings.notifyDMs) ||
+            (!isDM && !mentioned && notifSettings.notifyMessages)
+          if (shouldPlaySound) playMessageSound()
+
+          // Desktop notification
+          if (notifSettings.desktopNotifications && Notification.permission === 'granted') {
+            const author = (m as Message & { author?: { display_name?: string } }).author
+            const title = isDM ? `DM from ${author?.display_name || 'Someone'}` : (mentioned ? `Mentioned by ${author?.display_name || 'Someone'}` : `New message from ${author?.display_name || 'Someone'}`)
+            new Notification(title, { body: m.content.slice(0, 100), tag: m.channel_id })
+          }
+
           setUnreadChannels((prev) => {
             const existing = prev[m.channel_id] || { count: 0, mentioned: false }
-            return { ...prev, [m.channel_id]: { count: existing.count + 1, mentioned: existing.mentioned || mentioned } }
+            const serverId = channelServerMapRef.current[m.channel_id]
+            return { ...prev, [m.channel_id]: { count: existing.count + 1, mentioned: existing.mentioned || mentioned, serverId } }
           })
         }
       } else if (msg.type === 'call_offer') {
@@ -252,6 +317,8 @@ export default function Home() {
     if (selectedServer) {
       api.getChannels(selectedServer.id).then((chs) => {
         setChannels(chs)
+        // Update channel→server map
+        chs.forEach((ch) => { channelServerMapRef.current[ch.id] = selectedServer.id })
         // Auto-select the first text channel if none selected
         if (!selectedChannel || selectedChannel.server_id !== selectedServer.id) {
           const firstText = chs.find((c) => c.type === 'text')
@@ -466,6 +533,19 @@ export default function Home() {
         onCreate={handleCreateServer}
         isDMView={view === 'dm'}
         onJoinByCode={handleJoinByCode}
+        unreadDMs={unreadDMs}
+        onSelectDM={(ch) => {
+          setSelectedServer(null)
+          setView('dm')
+          setSelectedChannel(ch)
+          setUnreadChannels((prev) => {
+            if (!prev[ch.id]) return prev
+            const next = { ...prev }
+            delete next[ch.id]
+            return next
+          })
+        }}
+        serverUnreads={serverUnreads}
       />
 
       <div className={`channel-sidebar ${channelSidebarCollapsed ? 'collapsed' : ''}`}>

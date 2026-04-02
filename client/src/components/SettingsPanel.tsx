@@ -31,7 +31,7 @@ export default function SettingsPanel({ onClose }: Props) {
   const [nameColor, setNameColor] = useState(user?.name_color ?? '')
   const [profileSaving, setProfileSaving] = useState(false)
   const [profileSaved, setProfileSaved] = useState(false)
-  const [tab, setTab] = useState<'profile' | 'media' | 'theme' | 'devices'>('profile')
+  const [tab, setTab] = useState<'profile' | 'media' | 'theme' | 'devices' | 'notifications'>('profile')
   const [activeTheme, setActiveTheme] = useState(getThemeId)
   const [micTestStream, setMicTestStream] = useState<MediaStream | null>(null)
   const [micLevel, setMicLevel] = useState(0)
@@ -211,6 +211,9 @@ export default function SettingsPanel({ onClose }: Props) {
           </button>
           <button className={`settings-tab ${tab === 'devices' ? 'active' : ''}`} onClick={() => setTab('devices')}>
             Devices{pendingDevices.length > 0 && <span className="pending-badge">{pendingDevices.length}</span>}
+          </button>
+          <button className={`settings-tab ${tab === 'notifications' ? 'active' : ''}`} onClick={() => setTab('notifications')}>
+            Notifications
           </button>
         </div>
 
@@ -598,6 +601,69 @@ export default function SettingsPanel({ onClose }: Props) {
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {tab === 'notifications' && (
+          <div className="settings-body">
+            <h3>Notification Settings</h3>
+
+            <label className="settings-checkbox">
+              <input
+                type="checkbox"
+                checked={settings.notifyMessages}
+                onChange={(e) => {
+                  const next = { ...settings, notifyMessages: e.target.checked }
+                  setSettings(next)
+                  saveSettings(next)
+                }}
+              />
+              <span>Play sound for new messages</span>
+            </label>
+
+            <label className="settings-checkbox">
+              <input
+                type="checkbox"
+                checked={settings.notifyMentions}
+                onChange={(e) => {
+                  const next = { ...settings, notifyMentions: e.target.checked }
+                  setSettings(next)
+                  saveSettings(next)
+                }}
+              />
+              <span>Play sound for @mentions</span>
+            </label>
+
+            <label className="settings-checkbox">
+              <input
+                type="checkbox"
+                checked={settings.notifyDMs}
+                onChange={(e) => {
+                  const next = { ...settings, notifyDMs: e.target.checked }
+                  setSettings(next)
+                  saveSettings(next)
+                }}
+              />
+              <span>Play sound for direct messages</span>
+            </label>
+
+            <label className="settings-checkbox">
+              <input
+                type="checkbox"
+                checked={settings.desktopNotifications}
+                onChange={async (e) => {
+                  let enabled = e.target.checked
+                  if (enabled && Notification.permission !== 'granted') {
+                    const perm = await Notification.requestPermission()
+                    enabled = perm === 'granted'
+                  }
+                  const next = { ...settings, desktopNotifications: enabled }
+                  setSettings(next)
+                  saveSettings(next)
+                }}
+              />
+              <span>Desktop notifications</span>
+            </label>
           </div>
         )}
 

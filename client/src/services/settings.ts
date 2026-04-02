@@ -16,6 +16,12 @@ export interface MediaSettings {
   screenShareResolution: number // 0 = native, 360, 480, 720, 1080, 1440
   screenShareFramerate: number  // 15, 30, 60, 120
   screenShareMaxBitrate: number // 0 = auto, in kbps (e.g. 2500, 5000, 8000, 15000)
+  // Notification settings
+  notifyMessages: boolean    // play sound on new messages
+  notifyMentions: boolean    // play sound on @mentions
+  notifyDMs: boolean         // play sound on DM messages
+  desktopNotifications: boolean // show browser desktop notifications
+  notificationVolume: number // 0-100
 }
 
 const STORAGE_KEY = 'relay_media_settings'
@@ -36,6 +42,11 @@ const defaults: MediaSettings = {
   screenShareResolution: 0,
   screenShareFramerate: 30,
   screenShareMaxBitrate: 8000,
+  notifyMessages: true,
+  notifyMentions: true,
+  notifyDMs: true,
+  desktopNotifications: false,
+  notificationVolume: 100,
 }
 
 export function getSettings(): MediaSettings {

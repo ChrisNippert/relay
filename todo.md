@@ -1,15 +1,38 @@
 BUGS
 <!-- * Somehow the messages section is still too far over to the side. Can you find somewhere else that this problem is and fix it since everywhere youve fixed before hasn't changed it, and the redesign still has the problem persist. -->
 <!-- * Screenshare should cast audio. Watching on qpw graph, when I watch a stream no new inputs show up still! Im on firefox i guess if you need that information -->
-* For some reason camera and screenshare has latency and freezes up sometimes. Is this something that can be fixed here?
+* e2ee sometimes decryption fails? operation error is the error occurring but switching channels seemed to fix the issue until new messages are sent, in which case they are failing again. Images say decryption failed too but still display the image.
+* names in voice channel sideview move when lighting up since it grows and it's left aligned. Make it so it grows but does not move the text.
+
+* Images in encrypted channels are not encrypted
+* Sometimes image upload fails with html 413 error: <html> <head><title>413 Request Entity Too Large</title></head> <body> <center><h1>413 Request Entity Too Large</h1></center> <hr><center>nginx/1.24.0 (Ubuntu)</center> </body> </html>, and subsequent uploads take infinitely long. For reference the file is 9MB, so not at the limit. Switching channels seems to reset the infinite upload issue
+* For sometimes the noise gate threshold test microphone doesn't show a green bar. Can we always show the green bar even without the test microphone on?
+* Can't join from another device to replace current voice chat join (maybe)
+* When passing a file over the main window and going to some other window, it pops up "drop files here" and doesn't go away until i leave the servers page.
+
 
 QOL Stuff
+* When e2ee, make it so when a new device joins, it sends a message in the chat requesting keys and whoever presses the button generates keys for that user so new devices only get old keys when allowed. This can also be done by clicking on a user in the members page when in a text channel and clicking on a button with something like "send old keys" or something.
+* Optional e2ee in DMs (Same mechanism for ease)
+* Server bar notificaions
+* DM Notifications
+* Account based notification settings
+* Change server bar on the left to be names instead of squares to be less like discord. Also for new DMs, show the name beneath the DM tab, but above all the servers.
+    * Along with this, make users not have images or circles since we won't have profile pictures. It's supposed to have that old IRC/forum aesthetic
+
+* When selecting a channel/selecting a server auto joining a channel, put the cursor in the chat message box so I can start typing immediately
+
 * Improve audio pre-processing effects to mute things like keyboard, mouse clicks, and background noise
+
+* Take server out of login screen for now until we want to do federation
+
+* Make A mobile web version
 
 TODOs later
 <!-- * Look into Web transport instead of webrtc maybe? idk webrtc only does peer to peer. -->
 * Make sure user registration info is securely stored
 * Use turn instead of stun for servers since webrtc doesn't like VPNs apparently
+* 
 
 E2EE
 * Implement spec listed in protocol
