@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import type { Server, Channel } from '../types'
 
 interface DMEntry {
@@ -19,16 +19,18 @@ interface Props {
   unreadDMs?: DMEntry[]
   onSelectDM?: (channel: Channel) => void
   serverUnreads?: Record<string, { count: number; mentioned: boolean }>
-  collapsed?: boolean
-  onToggleCollapse?: () => void
+  onReorder?: (serverIds: string[]) => void
+  width?: number
 }
 
 export type { DMEntry }
 
-export default function ServerList({ servers, selected, onSelect, onDMs, onCreate, isDMView, onJoinByCode, unreadDMs, onSelectDM, serverUnreads, collapsed, onToggleCollapse }: Props) {
+export default function ServerList({ servers, selected, onSelect, onDMs, onCreate, isDMView, onJoinByCode, unreadDMs, onSelectDM, serverUnreads, onReorder, width }: Props) {
   const [showModal, setShowModal] = useState<'create' | 'join' | null>(null)
   const [serverName, setServerName] = useState('')
   const [joinCode, setJoinCode] = useState('')
+  const dragIdxRef = useRef<number | null>(null)
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
 
   const handleCreate = () => {
     const name = serverName.trim()
@@ -47,16 +49,16 @@ export default function ServerList({ servers, selected, onSelect, onDMs, onCreat
   }
 
   return (
-    <div className={`server-list ${collapsed ? 'collapsed' : ''}`}>
+    <div className="server-list" style={width ? { width } : undefined}>
       <button
         className={`server-nav-item dm-btn ${isDMView ? 'active' : ''}`}
         onClick={onDMs}
         title="Direct Messages"
       >
-        {collapsed ? <span className="server-nav-letter">DM</span> : <span className="server-nav-label">DMs</span>}
+        <span className="server-nav-label">DMs</span>
       </button>
 
-      {unreadDMs && unreadDMs.length > 0 && !collapsed && (
+      {unreadDMs && unreadDMs.length > 0 && (
         <>
           {unreadDMs.map((dm) => (
             <button
@@ -74,19 +76,39 @@ export default function ServerList({ servers, selected, onSelect, onDMs, onCreat
 
       <div className="server-divider" />
 
-      {servers.map((s) => {
+      {servers.map((s, idx) => {
         const unreads = serverUnreads?.[s.id]
         return (
           <button
             key={s.id}
-            className={`server-nav-item ${selected?.id === s.id ? 'active' : ''}`}
+            className={`server-nav-item ${selected?.id === s.id ? 'active' : ''} ${dragOverIdx === idx ? 'drag-over' : ''}`}
             onClick={() => onSelect(s)}
             title={s.name}
+            draggable
+            onDragStart={(e) => {
+              dragIdxRef.current = idx
+              e.dataTransfer.effectAllowed = 'move'
+            }}
+            onDragOver={(e) => {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+              setDragOverIdx(idx)
+            }}
+            onDragLeave={() => setDragOverIdx(null)}
+            onDrop={(e) => {
+              e.preventDefault()
+              setDragOverIdx(null)
+              const from = dragIdxRef.current
+              if (from === null || from === idx) return
+              const reordered = [...servers]
+              const [moved] = reordered.splice(from, 1)
+              reordered.splice(idx, 0, moved!)
+              onReorder?.(reordered.map((srv) => srv.id))
+              dragIdxRef.current = null
+            }}
+            onDragEnd={() => { dragIdxRef.current = null; setDragOverIdx(null) }}
           >
-            {collapsed
-              ? <span className="server-nav-letter">{s.name.charAt(0).toUpperCase()}</span>
-              : <span className="server-nav-label">{s.name}</span>
-            }
+            <span className="server-nav-label">{s.name}</span>
             {unreads && unreads.count > 0 && (
               <span className={`server-nav-badge ${unreads.mentioned ? 'mentioned' : ''}`}>{unreads.count}</span>
             )}
@@ -97,12 +119,6 @@ export default function ServerList({ servers, selected, onSelect, onDMs, onCreat
       <button className="server-nav-item add" onClick={() => setShowModal('create')} title="Create or Join Server">
         +
       </button>
-
-      {onToggleCollapse && (
-        <button className="server-nav-item server-collapse-btn" onClick={onToggleCollapse} title={collapsed ? 'Expand' : 'Collapse'}>
-          {collapsed ? '»' : '«'}
-        </button>
-      )}
 
       {showModal && (
         <div className="server-modal-overlay" onClick={() => setShowModal(null)}>

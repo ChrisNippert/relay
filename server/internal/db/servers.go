@@ -68,7 +68,7 @@ func (db *DB) GetServersByUser(userID string) ([]models.Server, error) {
 		 FROM servers s
 		 JOIN server_members sm ON s.id = sm.server_id
 		 WHERE sm.user_id = ?
-		 ORDER BY s.name`,
+		 ORDER BY sm.position, s.name`,
 		userID,
 	)
 	if err != nil {
@@ -117,6 +117,25 @@ func (db *DB) RemoveServerMember(serverID, userID string) error {
 		serverID, userID,
 	)
 	return err
+}
+
+func (db *DB) UpdateServerPositions(userID string, serverIDs []string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for i, sid := range serverIDs {
+		_, err := tx.Exec(
+			`UPDATE server_members SET position = ? WHERE server_id = ? AND user_id = ?`,
+			i, sid, userID,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (db *DB) GetServerMembers(serverID string) ([]models.ServerMember, error) {

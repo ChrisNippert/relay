@@ -18,6 +18,7 @@ const COLOR_PRESETS = [
 export default function SettingsPanel({ onClose }: Props) {
   const { user, updateUser, logout } = useAuth()
   const [settings, setSettings] = useState<MediaSettings>(getSettings)
+  const [closing, setClosing] = useState(false)
   const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([])
   const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([])
   const [videoInputs, setVideoInputs] = useState<MediaDeviceInfo[]>([])
@@ -31,13 +32,22 @@ export default function SettingsPanel({ onClose }: Props) {
   const [nameColor, setNameColor] = useState(user?.name_color ?? '')
   const [profileSaving, setProfileSaving] = useState(false)
   const [profileSaved, setProfileSaved] = useState(false)
-  const [tab, setTab] = useState<'profile' | 'media' | 'theme' | 'devices' | 'notifications'>('profile')
+  const [tab, setTab] = useState<'profile' | 'audio-stack' | 'video' | 'theme' | 'devices' | 'notifications'>('profile')
   const [activeTheme, setActiveTheme] = useState(getThemeId)
   const [micTestStream, setMicTestStream] = useState<MediaStream | null>(null)
-  const [micLevel, setMicLevel] = useState(0)
+  const [, setMicLevel] = useState(0)
+  const [expandedNode, setExpandedNode] = useState<string | null>(null)
+  const [draggedNode, setDraggedNode] = useState<string | null>(null)
+  const [eqContextMenu, setEqContextMenu] = useState<{ x: number; y: number; bandIdx: number } | null>(null)
   const micTestCtxRef = useRef<AudioContext | null>(null)
   const micTestAnimRef = useRef<number>(0)
   const micMonitorRef = useRef<{ stream: MediaStream; ctx: AudioContext; anim: number } | null>(null)
+  const spectrumCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const canvasDragRef = useRef<{ type: 'eq'; bandIdx: number } | { type: 'noisegate' } | null>(null)
+  const spectrumAnalyserRef = useRef<AnalyserNode | null>(null)
+  const spectrumDataRef = useRef<Uint8Array | null>(null)
+  const spectrumSampleRateRef = useRef<number>(48000)
+  const micTestEqFiltersRef = useRef<BiquadFilterNode[]>([])
 
   // E2E device approval state
   const [e2eDevices, setE2eDevices] = useState<Device[]>([])
@@ -62,9 +72,9 @@ export default function SettingsPanel({ onClose }: Props) {
     api.getPendingDevices().then(setPendingDevices).catch(() => {})
   }, [])
 
-  // Only load devices when media tab is opened
+  // Only load devices when audio-stack or video tab is opened
   useEffect(() => {
-    if (tab !== 'media' || devicesLoaded) return
+    if ((tab !== 'audio-stack' && tab !== 'video') || devicesLoaded) return
     setLoading(true)
     getDevices().then((d) => {
       setAudioInputs(d.audioInputs)
@@ -89,15 +99,17 @@ export default function SettingsPanel({ onClose }: Props) {
     }
   }, [micTestStream])
 
-  // Auto mic level monitoring when noise gate is enabled and on media tab (no loopback)
+  // Auto mic level monitoring when on audio-stack tab (no loopback) — also draws spectrum
   useEffect(() => {
-    if (tab !== 'media' || !settings.noiseGateEnabled || micTestStream) {
-      // Stop monitor if conditions not met or mic test is active (it provides its own level)
+    if (tab !== 'audio-stack' || micTestStream) {
+      // Stop monitor if conditions not met or mic test is active (it provides its own)
       if (micMonitorRef.current) {
         cancelAnimationFrame(micMonitorRef.current.anim)
         micMonitorRef.current.stream.getTracks().forEach(t => t.stop())
         micMonitorRef.current.ctx.close()
         micMonitorRef.current = null
+        spectrumAnalyserRef.current = null
+        spectrumDataRef.current = null
         if (!micTestStream) setMicLevel(0)
       }
       return
@@ -119,10 +131,13 @@ export default function SettingsPanel({ onClose }: Props) {
         if (ctx.state === 'suspended') await ctx.resume()
         const source = ctx.createMediaStreamSource(stream)
         const analyser = ctx.createAnalyser()
-        analyser.fftSize = 256
-        analyser.smoothingTimeConstant = 0.3
+        analyser.fftSize = 1024
+        analyser.smoothingTimeConstant = 0.7
         source.connect(analyser)
+        spectrumAnalyserRef.current = analyser
+        spectrumSampleRateRef.current = ctx.sampleRate
         const dataArray = new Uint8Array(analyser.frequencyBinCount)
+        spectrumDataRef.current = dataArray
         const check = () => {
           analyser.getByteFrequencyData(dataArray)
           let sum = 0
@@ -130,6 +145,7 @@ export default function SettingsPanel({ onClose }: Props) {
           const avg = sum / dataArray.length
           const normalized = Math.min((avg / 60) * 100, 100)
           setMicLevel(normalized)
+          drawSpectrum()
           if (!cancelled) micMonitorRef.current!.anim = requestAnimationFrame(check)
         }
         micMonitorRef.current = { stream, ctx, anim: requestAnimationFrame(check) }
@@ -142,9 +158,149 @@ export default function SettingsPanel({ onClose }: Props) {
         micMonitorRef.current.stream.getTracks().forEach(t => t.stop())
         micMonitorRef.current.ctx.close()
         micMonitorRef.current = null
+        spectrumAnalyserRef.current = null
+        spectrumDataRef.current = null
       }
     }
-  }, [tab, settings.noiseGateEnabled, micTestStream, settings.audioInputDevice])
+  }, [tab, micTestStream, settings.audioInputDevice])
+
+  const drawSpectrum = useCallback(() => {
+    const canvas = spectrumCanvasRef.current
+    const dataArray = spectrumDataRef.current
+    if (!canvas || !dataArray) return
+    const c = canvas.getContext('2d')
+    if (!c) return
+    const w = canvas.width, h = canvas.height
+    const liveS = getSettings()
+    const sr = spectrumSampleRateRef.current
+    const nyquist = sr / 2
+    const minF = 20, maxF = Math.min(nyquist, 20000)
+    const logMin = Math.log10(minF), logMax = Math.log10(maxF), logRange = logMax - logMin
+
+    c.clearRect(0, 0, w, h)
+    c.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg-tertiary').trim() || '#1a1a2e'
+    c.fillRect(0, 0, w, h)
+
+    // Draw frequency bars (log scale, 2px wide for smoother look)
+    for (let px = 0; px < w; px += 2) {
+      const f0 = Math.pow(10, logMin + (px / w) * logRange)
+      const f1 = Math.pow(10, logMin + ((px + 2) / w) * logRange)
+      const bin0 = Math.floor((f0 / nyquist) * dataArray.length)
+      const bin1 = Math.ceil((f1 / nyquist) * dataArray.length)
+      let maxAmp = 0
+      for (let b = Math.max(0, bin0); b <= Math.min(dataArray.length - 1, bin1); b++) {
+        if (dataArray[b]! > maxAmp) maxAmp = dataArray[b]!
+      }
+      const amplitude = maxAmp / 255
+      const barHeight = amplitude * h
+      c.fillStyle = `hsla(${120 - amplitude * 120}, 80%, 50%, 0.8)`
+      c.fillRect(px, h - barHeight, 2, barHeight)
+    }
+
+    // Draw EQ curve overlay
+    const bands = liveS.eqBands || []
+    if (bands.length > 0) {
+      c.beginPath()
+      c.strokeStyle = 'rgba(78, 205, 196, 0.7)'
+      c.lineWidth = 2
+      for (let px = 0; px < w; px++) {
+        const freq = Math.pow(10, logMin + (px / w) * logRange)
+        let gainDb = 0
+        for (const band of bands) {
+          const t = band.type || 'peaking'
+          if (t === 'peaking') {
+            const octaveDist = Math.log2(freq / band.freq)
+            gainDb += band.gain * Math.exp(-0.5 * Math.pow(octaveDist / 0.75, 2))
+          } else if (t === 'lowshelf') {
+            gainDb += band.gain / (1 + Math.pow(freq / band.freq, 2))
+          } else if (t === 'highshelf') {
+            gainDb += band.gain / (1 + Math.pow(band.freq / freq, 2))
+          } else if (t === 'lowpass') {
+            const ratio = freq / band.freq
+            if (ratio > 1) gainDb -= 12 * Math.log2(ratio) * Math.abs(band.gain) / 12
+          } else if (t === 'highpass') {
+            const ratio = band.freq / freq
+            if (ratio > 1) gainDb -= 12 * Math.log2(ratio) * Math.abs(band.gain) / 12
+          }
+        }
+        const y = h / 2 - (Math.max(-12, Math.min(12, gainDb)) / 12) * (h / 2)
+        if (px === 0) c.moveTo(px, y)
+        else c.lineTo(px, y)
+      }
+      c.stroke()
+
+      // Draw band handles with type-specific shapes
+      c.font = '9px Inter, sans-serif'
+      c.textAlign = 'center'
+      const typeColors: Record<string, string> = {
+        peaking: '#4ecdc4', lowpass: '#e94560', highpass: '#ff6b6b',
+        lowshelf: '#ffd93d', highshelf: '#6bcb77',
+      }
+      for (let i = 0; i < bands.length; i++) {
+        const band = bands[i]!
+        const bx = ((Math.log10(Math.max(band.freq, minF)) - logMin) / logRange) * w
+        const by = h / 2 - (band.gain / 12) * (h / 2)
+        const color = typeColors[band.type] || '#4ecdc4'
+        const dimColor = band.gain !== 0 ? color : `${color}80`
+        c.fillStyle = dimColor
+        c.strokeStyle = '#fff'
+        c.lineWidth = 1.5
+
+        const t = band.type || 'peaking'
+        if (t === 'lowpass' || t === 'highpass') {
+          // Triangle
+          const dir = t === 'lowpass' ? 1 : -1
+          c.beginPath()
+          c.moveTo(bx + dir * 8, by)
+          c.lineTo(bx - dir * 5, by - 7)
+          c.lineTo(bx - dir * 5, by + 7)
+          c.closePath()
+          c.fill(); c.stroke()
+        } else if (t === 'lowshelf' || t === 'highshelf') {
+          // Diamond
+          c.beginPath()
+          c.moveTo(bx, by - 8)
+          c.lineTo(bx + 7, by)
+          c.lineTo(bx, by + 8)
+          c.lineTo(bx - 7, by)
+          c.closePath()
+          c.fill(); c.stroke()
+        } else {
+          // Circle (peaking)
+          c.beginPath()
+          c.arc(bx, by, 7, 0, Math.PI * 2)
+          c.fill(); c.stroke()
+        }
+
+        // Freq label below handle
+        const freqLabel = band.freq >= 1000 ? `${(band.freq / 1000).toFixed(band.freq % 1000 === 0 ? 0 : 1)}k` : `${band.freq}`
+        c.fillStyle = 'rgba(255,255,255,0.7)'
+        c.fillText(freqLabel, bx, Math.min(by + 20, h - 2))
+        // dB label above handle (only if non-zero)
+        if (band.gain !== 0) {
+          c.fillStyle = color
+          c.fillText(`${band.gain > 0 ? '+' : ''}${band.gain}dB`, bx, Math.max(by - 12, 10))
+        }
+      }
+      c.textAlign = 'start'
+    }
+
+    // Noise gate threshold line
+    if (liveS.noiseGateEnabled) {
+      const ngY = h - (liveS.noiseGateThreshold / 100) * h
+      c.strokeStyle = '#e94560'
+      c.lineWidth = 2
+      c.setLineDash([6, 4])
+      c.beginPath()
+      c.moveTo(0, ngY)
+      c.lineTo(w, ngY)
+      c.stroke()
+      c.setLineDash([])
+      c.fillStyle = '#e94560'
+      c.font = '10px Inter, sans-serif'
+      c.fillText(`Gate ${liveS.noiseGateThreshold}%`, 4, ngY > 16 ? ngY - 4 : ngY + 14)
+    }
+  }, [])
 
   const toggleMicTest = async () => {
     if (micTestStream) {
@@ -174,31 +330,67 @@ export default function SettingsPanel({ onClose }: Props) {
       const ctx = new AudioContext()
       if (ctx.state === 'suspended') await ctx.resume()
       micTestCtxRef.current = ctx
+      spectrumSampleRateRef.current = ctx.sampleRate
       const source = ctx.createMediaStreamSource(stream)
       const analyser = ctx.createAnalyser()
-      analyser.fftSize = 256
-      analyser.smoothingTimeConstant = 0.3
+      analyser.fftSize = 1024
+      analyser.smoothingTimeConstant = 0.7
       source.connect(analyser)
+      spectrumAnalyserRef.current = analyser
+      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+      spectrumDataRef.current = dataArray
 
       // Loopback: play mic audio back through speakers so user can hear themselves
+      // Build filter chain: source → [filters per audioChainOrder] → loopbackGain → destination
       const loopbackGain = ctx.createGain()
       loopbackGain.gain.value = 1
-      source.connect(loopbackGain)
-      loopbackGain.connect(ctx.destination)
 
-      // Level meter animation loop
-      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+      let lastNode: AudioNode = source
+      const eqFilters: BiquadFilterNode[] = []
+      for (const nodeId of curSettings.audioChainOrder) {
+        if (nodeId === 'eq') {
+          for (const band of curSettings.eqBands || []) {
+            const eq = ctx.createBiquadFilter()
+            eq.type = band.type || 'peaking'
+            eq.frequency.value = band.freq
+            if (band.type === 'peaking' || !band.type) eq.Q.value = 1.4
+            else if (band.type === 'lowshelf' || band.type === 'highshelf') eq.Q.value = 1
+            else eq.Q.value = 0.7
+            eq.gain.value = band.gain
+            lastNode.connect(eq)
+            lastNode = eq
+            eqFilters.push(eq)
+          }
+        }
+      }
+      lastNode.connect(loopbackGain)
+      loopbackGain.connect(ctx.destination)
+      micTestEqFiltersRef.current = eqFilters
+
+      // Spectrum analyzer animation loop
       const check = () => {
         analyser.getByteFrequencyData(dataArray)
         let sum = 0
         for (let i = 0; i < dataArray.length; i++) sum += dataArray[i]!
         const avg = sum / dataArray.length
-        // Normalize to 0-100 range (frequency data averages around 0-60 for speech)
         const normalized = Math.min((avg / 60) * 100, 100)
         setMicLevel(normalized)
 
-        // Apply noise gate to loopback
+        drawSpectrum()
+
+        // Live-update EQ filter gains/freqs from current settings
         const liveSettings = getSettings()
+        const liveBands = liveSettings.eqBands || []
+        for (let i = 0; i < micTestEqFiltersRef.current.length && i < liveBands.length; i++) {
+          const f = micTestEqFiltersRef.current[i]!
+          const b = liveBands[i]!
+          if (f.gain.value !== b.gain) f.gain.setValueAtTime(b.gain, ctx.currentTime)
+          if (f.frequency.value !== b.freq) f.frequency.setValueAtTime(b.freq, ctx.currentTime)
+          const bType = b.type || 'peaking'
+          if (f.type !== bType) f.type = bType
+        }
+
+        // Apply noise gate to loopback
         if (liveSettings.noiseGateEnabled) {
           const speaking = normalized > liveSettings.noiseGateThreshold
           loopbackGain.gain.setTargetAtTime(speaking ? 1 : 0, ctx.currentTime, 0.01)
@@ -228,6 +420,91 @@ export default function SettingsPanel({ onClose }: Props) {
     } catch { /* camera not available */ }
   }
 
+  // Spectrum analyzer canvas mouse handlers for dragging EQ band handles / noise gate
+  const spectrumLogParams = () => {
+    const sr = spectrumSampleRateRef.current
+    const nyquist = sr / 2
+    const minF = 20, maxF = Math.min(nyquist, 20000)
+    const logMin = Math.log10(minF), logMax = Math.log10(maxF), logRange = logMax - logMin
+    return { nyquist, minF, maxF, logMin, logMax, logRange }
+  }
+
+  const handleSpectrumMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = spectrumCanvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const x = ((e.clientX - rect.left) / rect.width) * canvas.width
+    const y = ((e.clientY - rect.top) / rect.height) * canvas.height
+    const { logMin, logRange, minF } = spectrumLogParams()
+    const w = canvas.width, h = canvas.height
+    const prox = 16
+
+    // Check EQ band handles
+    const bands = settings.eqBands || []
+    for (let i = 0; i < bands.length; i++) {
+      const band = bands[i]!
+      const bx = ((Math.log10(Math.max(band.freq, minF)) - logMin) / logRange) * w
+      const by = h / 2 - (band.gain / 12) * (h / 2)
+      const dist = Math.sqrt((x - bx) ** 2 + (y - by) ** 2)
+      if (dist < prox) { canvasDragRef.current = { type: 'eq', bandIdx: i }; return }
+    }
+    // Check noise gate threshold line
+    if (settings.noiseGateEnabled) {
+      const ngY = h - (settings.noiseGateThreshold / 100) * h
+      if (Math.abs(y - ngY) < prox) { canvasDragRef.current = { type: 'noisegate' }; return }
+    }
+  }
+
+  const handleSpectrumMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const drag = canvasDragRef.current
+    if (!drag) return
+    const canvas = spectrumCanvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const x = ((e.clientX - rect.left) / rect.width) * canvas.width
+    const y = ((e.clientY - rect.top) / rect.height) * canvas.height
+    const { logMin, logRange } = spectrumLogParams()
+
+    if (drag.type === 'eq') {
+      const freq = Math.pow(10, logMin + (x / canvas.width) * logRange)
+      const clampedFreq = Math.round(Math.max(20, Math.min(20000, freq)))
+      const gain = Math.round(Math.max(-12, Math.min(12, ((canvas.height / 2 - y) / (canvas.height / 2)) * 12)))
+      const bands = [...(settings.eqBands || [])]
+      if (bands[drag.bandIdx]) {
+        bands[drag.bandIdx] = { ...bands[drag.bandIdx]!, freq: clampedFreq, gain }
+        update({ eqBands: bands })
+      }
+    } else if (drag.type === 'noisegate') {
+      const threshold = Math.round(Math.max(0, Math.min(100, (1 - y / canvas.height) * 100)))
+      update({ noiseGateThreshold: threshold })
+    }
+  }
+
+  const handleSpectrumMouseUp = () => { canvasDragRef.current = null }
+
+  const handleSpectrumContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.preventDefault()
+    const canvas = spectrumCanvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const x = ((e.clientX - rect.left) / rect.width) * canvas.width
+    const y = ((e.clientY - rect.top) / rect.height) * canvas.height
+    const { logMin, logRange, minF } = spectrumLogParams()
+    const w = canvas.width, h = canvas.height
+
+    const bands = settings.eqBands || []
+    for (let i = 0; i < bands.length; i++) {
+      const band = bands[i]!
+      const bx = ((Math.log10(Math.max(band.freq, minF)) - logMin) / logRange) * w
+      const by = h / 2 - (band.gain / 12) * (h / 2)
+      if (Math.sqrt((x - bx) ** 2 + (y - by) ** 2) < 16) {
+        setEqContextMenu({ x: e.clientX, y: e.clientY, bandIdx: i })
+        return
+      }
+    }
+    setEqContextMenu(null)
+  }
+
   const update = (partial: Partial<MediaSettings>) => {
     const next = { ...settings, ...partial }
     setSettings(next)
@@ -249,31 +526,46 @@ export default function SettingsPanel({ onClose }: Props) {
     setProfileSaving(false)
   }
 
+  const handleClose = () => {
+    setClosing(true)
+    setTimeout(onClose, 200)
+  }
+
   return (
-    <div className="settings-overlay" onClick={onClose}>
+    <div className={`settings-overlay ${closing ? 'closing' : ''}`} onClick={handleClose}>
       <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="settings-header">
-          <h2>Settings</h2>
-          <button className="close-btn" onClick={onClose}>×</button>
+        <div className="settings-sidebar">
+          <h2 className="settings-sidebar-title">Settings</h2>
+          <nav className="settings-nav">
+            <button className={`settings-nav-item ${tab === 'profile' ? 'active' : ''}`} onClick={() => setTab('profile')}>
+              Profile
+            </button>
+            <button className={`settings-nav-item ${tab === 'audio-stack' ? 'active' : ''}`} onClick={() => setTab('audio-stack')}>
+              Audio
+            </button>
+            <button className={`settings-nav-item ${tab === 'video' ? 'active' : ''}`} onClick={() => setTab('video')}>
+              Video
+            </button>
+            <button className={`settings-nav-item ${tab === 'theme' ? 'active' : ''}`} onClick={() => setTab('theme')}>
+              Theme
+            </button>
+            <button className={`settings-nav-item ${tab === 'devices' ? 'active' : ''}`} onClick={() => setTab('devices')}>
+              Devices{pendingDevices.length > 0 && <span className="pending-badge">{pendingDevices.length}</span>}
+            </button>
+            <button className={`settings-nav-item ${tab === 'notifications' ? 'active' : ''}`} onClick={() => setTab('notifications')}>
+              Notifications
+            </button>
+          </nav>
+          <div className="settings-nav-footer">
+            <button className="danger-btn settings-logout-btn" onClick={logout}>Log Out</button>
+          </div>
         </div>
 
-        <div className="settings-tabs">
-          <button className={`settings-tab ${tab === 'profile' ? 'active' : ''}`} onClick={() => setTab('profile')}>
-            Profile
-          </button>
-          <button className={`settings-tab ${tab === 'media' ? 'active' : ''}`} onClick={() => setTab('media')}>
-            Audio &amp; Video
-          </button>
-          <button className={`settings-tab ${tab === 'theme' ? 'active' : ''}`} onClick={() => setTab('theme')}>
-            Theme
-          </button>
-          <button className={`settings-tab ${tab === 'devices' ? 'active' : ''}`} onClick={() => setTab('devices')}>
-            Devices{pendingDevices.length > 0 && <span className="pending-badge">{pendingDevices.length}</span>}
-          </button>
-          <button className={`settings-tab ${tab === 'notifications' ? 'active' : ''}`} onClick={() => setTab('notifications')}>
-            Notifications
-          </button>
-        </div>
+        <div className="settings-content">
+          <div className="settings-content-header">
+            <h2>{tab === 'profile' ? 'Profile' : tab === 'audio-stack' ? 'Audio' : tab === 'video' ? 'Video' : tab === 'theme' ? 'Theme' : tab === 'devices' ? 'Devices' : 'Notifications'}</h2>
+            <button className="close-btn" onClick={handleClose}>✕</button>
+          </div>
 
         {tab === 'profile' && (
           <div className="settings-body">
@@ -349,146 +641,11 @@ export default function SettingsPanel({ onClose }: Props) {
           </div>
         )}
 
-        {tab === 'media' && (
+        {tab === 'video' && (
           loading ? (
             <p className="settings-loading">Loading devices...</p>
           ) : (
             <div className="settings-body">
-              <h3 className="settings-section">Audio Input (Microphone)</h3>
-              <select
-                value={settings.audioInputDevice}
-                onChange={(e) => update({ audioInputDevice: e.target.value })}
-              >
-                <option value="">Default</option>
-                {audioInputs.map((d) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Microphone ${d.deviceId.slice(0, 8)}`}
-                  </option>
-                ))}
-              </select>
-
-              <label className="settings-slider">
-                <span>Input Volume</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={settings.inputVolume}
-                  onChange={(e) => update({ inputVolume: Number(e.target.value) })}
-                />
-                <span className="slider-value">{settings.inputVolume}%</span>
-              </label>
-
-              <h3 className="settings-section">Audio Output (Speakers)</h3>
-              {audioOutputs.length > 0 ? (
-                <select
-                  value={settings.audioOutputDevice}
-                  onChange={(e) => update({ audioOutputDevice: e.target.value })}
-                >
-                  <option value="">Default</option>
-                  {audioOutputs.map((d) => (
-                    <option key={d.deviceId} value={d.deviceId}>
-                      {d.label || `Speaker ${d.deviceId.slice(0, 8)}`}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <p className="settings-note">Output device selection not supported in this browser</p>
-              )}
-
-              <label className="settings-slider">
-                <span>Output Volume</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={settings.outputVolume}
-                  onChange={(e) => update({ outputVolume: Number(e.target.value) })}
-                />
-                <span className="slider-value">{settings.outputVolume}%</span>
-              </label>
-
-              <h3 className="settings-section">Voice Processing</h3>
-              <label className="settings-toggle">
-                <input
-                  type="checkbox"
-                  checked={settings.noiseSuppression}
-                  onChange={(e) => update({ noiseSuppression: e.target.checked })}
-                />
-                <span>Noise Suppression</span>
-              </label>
-              <label className="settings-toggle">
-                <input
-                  type="checkbox"
-                  checked={settings.echoCancellation}
-                  onChange={(e) => update({ echoCancellation: e.target.checked })}
-                />
-                <span>Echo Cancellation</span>
-              </label>
-              <label className="settings-toggle">
-                <input
-                  type="checkbox"
-                  checked={settings.autoGainControl}
-                  onChange={(e) => update({ autoGainControl: e.target.checked })}
-                />
-                <span>Auto Gain Control</span>
-              </label>
-
-              <h3 className="settings-section">Audio Mode</h3>
-              <div className="settings-radio-group">
-                <label className="settings-toggle">
-                  <input
-                    type="radio"
-                    name="channelCount"
-                    checked={settings.channelCount === 1}
-                    onChange={() => update({ channelCount: 1 })}
-                  />
-                  <span>Mono (recommended for voice)</span>
-                </label>
-                <label className="settings-toggle">
-                  <input
-                    type="radio"
-                    name="channelCount"
-                    checked={settings.channelCount === 2}
-                    onChange={() => update({ channelCount: 2 })}
-                  />
-                  <span>Stereo</span>
-                </label>
-              </div>
-
-              <h3 className="settings-section">Noise Gate</h3>
-              <label className="settings-toggle">
-                <input
-                  type="checkbox"
-                  checked={settings.noiseGateEnabled}
-                  onChange={(e) => update({ noiseGateEnabled: e.target.checked })}
-                />
-                <span>Enable Noise Gate</span>
-              </label>
-              {settings.noiseGateEnabled && (
-                <label className="settings-slider">
-                  <span>Threshold</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={settings.noiseGateThreshold}
-                    onChange={(e) => update({ noiseGateThreshold: Number(e.target.value) })}
-                  />
-                  <span className="slider-value">{settings.noiseGateThreshold}</span>
-                </label>
-              )}
-
-              <div className="mic-level-meter">
-                <div className="mic-level-bar" style={{ width: `${Math.min(micLevel, 100)}%` }} />
-                {settings.noiseGateEnabled && (
-                  <div className="mic-level-threshold" style={{ left: `${settings.noiseGateThreshold}%` }} />
-                )}
-              </div>
-              <button className="settings-preview-btn" onClick={toggleMicTest}>
-                {micTestStream ? '⏹ Stop Mic Test' : '🎤 Test Microphone'}
-              </button>
-
               <h3 className="settings-section">Camera</h3>
               <select
                 value={settings.videoDevice}
@@ -716,8 +873,323 @@ export default function SettingsPanel({ onClose }: Props) {
           </div>
         )}
 
-        <div className="settings-logout-section">
-          <button className="danger-btn settings-logout-btn" onClick={logout}>Log Out</button>
+        {tab === 'audio-stack' && (
+          loading ? (
+            <p className="settings-loading">Loading devices...</p>
+          ) : (
+            <div className="settings-body">
+              <h3 className="settings-section">Audio Input (Microphone)</h3>
+              <select
+                value={settings.audioInputDevice}
+                onChange={(e) => update({ audioInputDevice: e.target.value })}
+              >
+                <option value="">Default</option>
+                {audioInputs.map((d) => (
+                  <option key={d.deviceId} value={d.deviceId}>
+                    {d.label || `Microphone ${d.deviceId.slice(0, 8)}`}
+                  </option>
+                ))}
+              </select>
+
+              <label className="settings-slider">
+                <span>Input Volume</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={settings.inputVolume}
+                  onChange={(e) => update({ inputVolume: Number(e.target.value) })}
+                />
+                <span className="slider-value">{settings.inputVolume}%</span>
+              </label>
+
+              <h3 className="settings-section">Audio Output (Speakers)</h3>
+              {audioOutputs.length > 0 ? (
+                <select
+                  value={settings.audioOutputDevice}
+                  onChange={(e) => update({ audioOutputDevice: e.target.value })}
+                >
+                  <option value="">Default</option>
+                  {audioOutputs.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label || `Speaker ${d.deviceId.slice(0, 8)}`}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <p className="settings-note">Output device selection not supported in this browser</p>
+              )}
+
+              <label className="settings-slider">
+                <span>Output Volume</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={settings.outputVolume}
+                  onChange={(e) => update({ outputVolume: Number(e.target.value) })}
+                />
+                <span className="slider-value">{settings.outputVolume}%</span>
+              </label>
+
+              <h3 className="settings-section">Audio Mode</h3>
+              <div className="settings-radio-group">
+                <label className="settings-toggle">
+                  <input
+                    type="radio"
+                    name="channelCount"
+                    checked={settings.channelCount === 1}
+                    onChange={() => update({ channelCount: 1 })}
+                  />
+                  <span>Mono (recommended for voice)</span>
+                </label>
+                <label className="settings-toggle">
+                  <input
+                    type="radio"
+                    name="channelCount"
+                    checked={settings.channelCount === 2}
+                    onChange={() => update({ channelCount: 2 })}
+                  />
+                  <span>Stereo</span>
+                </label>
+              </div>
+
+              <h3 className="settings-section">Signal Chain</h3>
+              <p className="settings-hint">
+                Click a node to enable/disable. Drag to reorder. Click ✏️ to expand settings.
+              </p>
+
+              <div className="audio-chain-diagram">
+                <span className="audio-chain-node">🎤 Mic</span>
+                <span className="audio-chain-arrow">→</span>
+                {settings.audioChainOrder.filter(n => n === 'eq' || n === 'noisegate').map((nodeId, idx, arr) => {
+                  const isActive = nodeId === 'eq' ? (settings.eqBands || []).some(b => b.gain !== 0)
+                    : settings.noiseGateEnabled
+                  const label = nodeId === 'eq' ? 'EQ' : 'Noise Gate'
+                  return (
+                    <span key={nodeId} style={{ display: 'contents' }}>
+                      <span
+                        className={`audio-chain-node interactive ${isActive ? 'active' : 'bypassed'} ${draggedNode === nodeId ? 'dragging' : ''}`}
+                        draggable
+                        onDragStart={() => setDraggedNode(nodeId)}
+                        onDragEnd={() => setDraggedNode(null)}
+                        onDragOver={(e) => {
+                          e.preventDefault()
+                          if (draggedNode && draggedNode !== nodeId) {
+                            const order = [...settings.audioChainOrder]
+                            const fromIdx = order.indexOf(draggedNode)
+                            const toIdx = order.indexOf(nodeId)
+                            if (fromIdx !== -1 && toIdx !== -1) {
+                              order.splice(fromIdx, 1)
+                              order.splice(toIdx, 0, draggedNode)
+                              update({ audioChainOrder: order })
+                            }
+                          }
+                        }}
+                      >
+                        <span
+                          className="audio-chain-node-label"
+                          onClick={() => {
+                            if (nodeId === 'eq') {
+                              const allZero = (settings.eqBands || []).every(b => b.gain === 0)
+                              if (allZero) {
+                                update({ eqBands: (settings.eqBands || []).map((b, i) => ({ ...b, gain: [2, 3, 1, 0, -1, 0, 1, 2, 3, 2][i] || 0 })) })
+                              } else {
+                                update({ eqBands: (settings.eqBands || []).map(b => ({ ...b, gain: 0 })) })
+                              }
+                            } else update({ noiseGateEnabled: !settings.noiseGateEnabled })
+                          }}
+                        >{label}</span>
+                        <span
+                          className={`audio-chain-node-edit ${expandedNode === nodeId ? 'expanded' : ''}`}
+                          onClick={(e) => { e.stopPropagation(); setExpandedNode(expandedNode === nodeId ? null : nodeId) }}
+                        >✏️</span>
+                      </span>
+                      {idx < arr.length - 1 && (
+                        <span className="audio-chain-arrow">→</span>
+                      )}
+                    </span>
+                  )
+                })}
+                <span className="audio-chain-arrow">→</span>
+                <span className="audio-chain-node">🔊 Output</span>
+              </div>
+
+              {expandedNode === 'eq' && (
+                <div className="audio-chain-settings">
+                  <h4>Parametric Equalizer</h4>
+                  <p className="settings-hint">Drag handles on the spectrum. Right-click a handle to change filter type. ±12 dB per band.</p>
+                  <div className="eq-sliders-grid">
+                    {(settings.eqBands || []).map((band, i) => {
+                      const typeLabels: Record<string, string> = { peaking: 'PK', lowpass: 'LP', highpass: 'HP', lowshelf: 'LS', highshelf: 'HS' }
+                      return (
+                        <label className="eq-band-slider" key={i}>
+                          <span className="eq-band-freq">{band.freq >= 1000 ? `${(band.freq / 1000).toFixed(band.freq % 1000 === 0 ? 0 : 1)}k` : `${band.freq}`}</span>
+                          <span className="eq-band-type">{typeLabels[band.type] || 'PK'}</span>
+                          <input
+                            type="range"
+                            min={-12}
+                            max={12}
+                            step={1}
+                            value={band.gain}
+                            className="eq-band-range"
+                            onChange={(e) => {
+                              const bands = [...(settings.eqBands || [])]
+                              bands[i] = { ...bands[i]!, gain: Number(e.target.value) }
+                              update({ eqBands: bands })
+                            }}
+                          />
+                          <span className="eq-band-db">{band.gain > 0 ? '+' : ''}{band.gain}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                    <button className="settings-preview-btn" onClick={() => update({ eqBands: (settings.eqBands || []).map(b => ({ ...b, gain: 0 })) })}>
+                      Flat
+                    </button>
+                    <button className="settings-preview-btn" onClick={() => update({ eqBands: (settings.eqBands || []).map((b, i) => ({ ...b, gain: [4, 3, 1, 0, -1, -1, 0, 2, 3, 4][i] || 0 })) })}>
+                      Bass Boost
+                    </button>
+                    <button className="settings-preview-btn" onClick={() => update({ eqBands: (settings.eqBands || []).map((b, i) => ({ ...b, gain: [-2, -1, 0, 2, 4, 4, 2, 0, -1, -2][i] || 0 })) })}>
+                      Vocal
+                    </button>
+                    <button className="settings-preview-btn" onClick={() => update({ eqBands: (settings.eqBands || []).map((b, i) => ({ ...b, gain: [0, 0, -1, -2, 0, 2, 4, 5, 4, 3][i] || 0 })) })}>
+                      Treble Boost
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {expandedNode === 'noisegate' && (
+                <div className="audio-chain-settings">
+                  <h4>Noise Gate</h4>
+                  <label className="settings-slider">
+                    <span>Threshold</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={settings.noiseGateThreshold}
+                      onChange={(e) => update({ noiseGateThreshold: Number(e.target.value) })}
+                    />
+                    <span className="slider-value">{settings.noiseGateThreshold}</span>
+                  </label>
+                  <label className="settings-slider">
+                    <span>Hold</span>
+                    <input
+                      type="range"
+                      min={50}
+                      max={1000}
+                      step={10}
+                      value={settings.noiseGateHold}
+                      onChange={(e) => update({ noiseGateHold: Number(e.target.value) })}
+                    />
+                    <span className="slider-value">{settings.noiseGateHold} ms</span>
+                  </label>
+                  <label className="settings-slider">
+                    <span>Attack</span>
+                    <input
+                      type="range"
+                      min={1}
+                      max={100}
+                      value={settings.noiseGateAttack}
+                      onChange={(e) => update({ noiseGateAttack: Number(e.target.value) })}
+                    />
+                    <span className="slider-value">{settings.noiseGateAttack} ms</span>
+                  </label>
+                  <label className="settings-slider">
+                    <span>Release</span>
+                    <input
+                      type="range"
+                      min={10}
+                      max={500}
+                      step={5}
+                      value={settings.noiseGateRelease}
+                      onChange={(e) => update({ noiseGateRelease: Number(e.target.value) })}
+                    />
+                    <span className="slider-value">{settings.noiseGateRelease} ms</span>
+                  </label>
+                </div>
+              )}
+
+              <h3 className="settings-section">Browser Processing</h3>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={settings.noiseSuppression}
+                  onChange={(e) => update({ noiseSuppression: e.target.checked })}
+                />
+                <span>Noise Suppression</span>
+              </label>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={settings.echoCancellation}
+                  onChange={(e) => update({ echoCancellation: e.target.checked })}
+                />
+                <span>Echo Cancellation</span>
+              </label>
+
+              <div style={{ position: 'relative', display: 'inline-block' }}>
+                <canvas
+                  ref={spectrumCanvasRef}
+                  className="spectrum-analyzer"
+                  width={600}
+                  height={140}
+                  onMouseDown={(e) => { setEqContextMenu(null); handleSpectrumMouseDown(e) }}
+                  onMouseMove={handleSpectrumMouseMove}
+                  onMouseUp={handleSpectrumMouseUp}
+                  onMouseLeave={handleSpectrumMouseUp}
+                  onContextMenu={handleSpectrumContextMenu}
+                />
+                {eqContextMenu && (() => {
+                  const canvasRect = spectrumCanvasRef.current?.getBoundingClientRect()
+                  const menuX = canvasRect ? eqContextMenu.x - canvasRect.left : 0
+                  const menuY = canvasRect ? eqContextMenu.y - canvasRect.top : 0
+                  const band = settings.eqBands?.[eqContextMenu.bandIdx]
+                  const types: { label: string; value: 'peaking' | 'lowpass' | 'highpass' | 'lowshelf' | 'highshelf' }[] = [
+                    { label: 'Peaking', value: 'peaking' },
+                    { label: 'Low Shelf', value: 'lowshelf' },
+                    { label: 'High Shelf', value: 'highshelf' },
+                    { label: 'Low Pass', value: 'lowpass' },
+                    { label: 'High Pass', value: 'highpass' },
+                  ]
+                  return (
+                    <div
+                      className="eq-context-menu"
+                      style={{ position: 'absolute', left: menuX, top: menuY, zIndex: 100 }}
+                      onMouseLeave={() => setEqContextMenu(null)}
+                    >
+                      <div className="eq-context-label">Band {eqContextMenu.bandIdx + 1} — {Math.round(band?.freq ?? 0)} Hz</div>
+                      {types.map(t => (
+                        <button
+                          key={t.value}
+                          className={`eq-context-item${band?.type === t.value ? ' active' : ''}`}
+                          onClick={() => {
+                            const bands = [...(settings.eqBands || [])]
+                            if (bands[eqContextMenu.bandIdx]) {
+                              bands[eqContextMenu.bandIdx] = { ...bands[eqContextMenu.bandIdx]!, type: t.value }
+                              update({ eqBands: bands })
+                            }
+                            setEqContextMenu(null)
+                          }}
+                        >{t.label}</button>
+                      ))}
+                    </div>
+                  )
+                })()}
+              </div>
+              <p className="settings-hint" style={{ marginTop: 4 }}>
+                Drag EQ handles to shape your sound. Right-click a handle to change filter type. Drag the gate line to adjust threshold.
+              </p>
+              <button className="settings-preview-btn" onClick={toggleMicTest}>
+                {micTestStream ? '⏹ Stop Mic Test' : '🎤 Test Microphone'}
+              </button>
+            </div>
+          )
+        )}
+
         </div>
       </div>
     </div>

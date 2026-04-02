@@ -16,6 +16,8 @@ interface Props {
   onToggleMembers?: () => void
   isAdmin?: boolean
   serverId?: string
+  channelSidebarCollapsed?: boolean
+  onToggleChannelSidebar?: () => void
 }
 
 const URL_REGEX = /https?:\/\/[^\s<]+/g
@@ -291,7 +293,7 @@ function EncryptedAttachment({ attachmentId, channelId, filename, onLoad }: { at
   )
 }
 
-export default function ChatView({ channel, onStartCall, onDMUser, showMembersToggle, showMembers, onToggleMembers, isAdmin, serverId: _serverId }: Props) {
+export default function ChatView({ channel, onStartCall, onDMUser, showMembersToggle, showMembers, onToggleMembers, isAdmin, serverId: _serverId, channelSidebarCollapsed, onToggleChannelSidebar }: Props) {
   const { user } = useAuth()
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -1121,6 +1123,15 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     >
       <div className="chat-header">
         <div className="chat-header-left">
+          {onToggleChannelSidebar && (
+            <button
+              className="sidebar-toggle-btn"
+              onClick={onToggleChannelSidebar}
+              title={channelSidebarCollapsed ? 'Show Channels' : 'Hide Channels'}
+            >
+              {channelSidebarCollapsed ? '»' : '«'}
+            </button>
+          )}
           <span className="chat-header-name">
             {channel.server_id ? '#' : '💬'} {channel.server_id ? channel.name : (dmPartnerName || channel.name)}
             {encrypted && <span className="chat-header-lock" title={encryptionReady ? 'End-to-end encrypted' : 'Encrypted — waiting for key'}>{encryptionReady ? '🔒' : '🔓'}</span>}
@@ -1143,7 +1154,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
           )}
           {showMembersToggle && (
             <button
-              className={`chat-header-toggle ${showMembers ? 'active' : ''}`}
+              className={`sidebar-toggle-btn ${showMembers ? 'active' : ''}`}
               onClick={onToggleMembers}
               title={showMembers ? 'Hide Members' : 'Show Members'}
             >

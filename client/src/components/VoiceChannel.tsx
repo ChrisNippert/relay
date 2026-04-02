@@ -15,6 +15,8 @@ interface Props {
   isAdmin?: boolean
   showMembers?: boolean
   onToggleMembers?: () => void
+  channelSidebarCollapsed?: boolean
+  onToggleChannelSidebar?: () => void
 }
 
 export interface VoiceChannelHandle {
@@ -43,7 +45,7 @@ interface VoiceUser {
   deafened: boolean
 }
 
-export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ channel, autoJoin, onJoin, onLeave, isAdmin, showMembers, onToggleMembers }, ref) {
+export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ channel, autoJoin, onJoin, onLeave, isAdmin, showMembers, onToggleMembers, channelSidebarCollapsed, onToggleChannelSidebar }, ref) {
   const { user } = useAuth()
   const [joined, setJoined] = useState(false)
   const [voiceUsers, setVoiceUsers] = useState<VoiceUser[]>([])
@@ -246,7 +248,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       track.applyConstraints({
         noiseSuppression: settings.noiseSuppression,
         echoCancellation: settings.echoCancellation,
-        autoGainControl: settings.autoGainControl,
+        autoGainControl: true,
       }).catch(() => {})
     }
     window.addEventListener('media-settings-changed', applySettings)
@@ -300,32 +302,53 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       const ctx = new AudioContext()
       audioContextRef.current = ctx
       const source = ctx.createMediaStreamSource(stream)
+      const initSettings = getSettings()
 
-      // High-pass filter to remove low-frequency rumble (keyboard, mouse clicks, desk vibrations)
-      const highpass = ctx.createBiquadFilter()
-      highpass.type = 'highpass'
-      highpass.frequency.value = 100
-      highpass.Q.value = 0.7
-      source.connect(highpass)
+      // Build filter chain dynamically based on audioChainOrder setting
+      let lastNode: AudioNode = source
 
-      // Low-pass filter to remove high-frequency hiss and artifacts
-      const lowpass = ctx.createBiquadFilter()
-      lowpass.type = 'lowpass'
-      lowpass.frequency.value = 7500
-      lowpass.Q.value = 0.7
-      highpass.connect(lowpass)
+      const chainOrder = initSettings.audioChainOrder || ['eq', 'noisegate']
+      for (const nodeId of chainOrder) {
+        if (nodeId === 'eq') {
+          for (const band of initSettings.eqBands || []) {
+            const eq = ctx.createBiquadFilter()
+            const bType = band.type || 'peaking'
+            eq.type = bType
+            eq.frequency.value = band.freq
+            eq.Q.value = bType === 'peaking' ? 1.4 : bType === 'lowshelf' || bType === 'highshelf' ? 1 : 0.7
+            eq.gain.value = band.gain
+            lastNode.connect(eq)
+            lastNode = eq
+          }
+        } else if (nodeId === 'highpass' && initSettings.highpassFreq > 0) {
+          const highpass = ctx.createBiquadFilter()
+          highpass.type = 'highpass'
+          highpass.frequency.value = initSettings.highpassFreq
+          highpass.Q.value = 0.7
+          lastNode.connect(highpass)
+          lastNode = highpass
+        } else if (nodeId === 'lowpass' && initSettings.lowpassFreq > 0) {
+          const lowpass = ctx.createBiquadFilter()
+          lowpass.type = 'lowpass'
+          lowpass.frequency.value = initSettings.lowpassFreq
+          lowpass.Q.value = 0.7
+          lastNode.connect(lowpass)
+          lastNode = lowpass
+        }
+        // noisegate is handled via the gain node below
+      }
 
       const analyser = ctx.createAnalyser()
       analyser.fftSize = 512
       analyser.smoothingTimeConstant = 0.6
-      lowpass.connect(analyser)
+      lastNode.connect(analyser)
       analyserRef.current = analyser
 
       // Always set up noise gate chain (gain node) so it can be toggled dynamically
       const gain = ctx.createGain()
       gain.gain.value = 1
       gainNodeRef.current = gain
-      lowpass.connect(gain)
+      lastNode.connect(gain)
       const dest = ctx.createMediaStreamDestination()
       gain.connect(dest)
       // Replace the audio track in the stream and all peer connections
@@ -355,16 +378,17 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         const now = performance.now()
         const aboveThreshold = !mutedRef.current && avg > threshold
 
-        // Hold gate open for 250ms after speech stops to avoid clipping word endings
-        if (aboveThreshold) gateHoldUntil = now + 250
+        // Hold gate open after speech stops to avoid clipping word endings
+        if (aboveThreshold) gateHoldUntil = now + curSettings.noiseGateHold
         const isSpeaking = aboveThreshold || now < gateHoldUntil
 
         // Apply noise gate (also gate when muted)
         if (gainNodeRef.current) {
           const gateActive = curSettings.noiseGateEnabled || mutedRef.current
           if (gateActive) {
-            // Use slower release (80ms) to avoid harsh cutoffs
-            gainNodeRef.current.gain.setTargetAtTime(isSpeaking ? 1 : 0, audioContextRef.current!.currentTime, isSpeaking ? 0.01 : 0.08)
+            const attackSec = curSettings.noiseGateAttack / 1000
+            const releaseSec = curSettings.noiseGateRelease / 1000
+            gainNodeRef.current.gain.setTargetAtTime(isSpeaking ? 1 : 0, audioContextRef.current!.currentTime, isSpeaking ? attackSec : releaseSec)
           } else {
             gainNodeRef.current.gain.setTargetAtTime(1, audioContextRef.current!.currentTime, 0.01)
           }
@@ -443,7 +467,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     const constraints: MediaTrackConstraints = {
       noiseSuppression: settings.noiseSuppression,
       echoCancellation: settings.echoCancellation,
-      autoGainControl: settings.autoGainControl,
+      autoGainControl: true,
       channelCount: settings.channelCount,
     }
     if (settings.audioInputDevice) {
@@ -1344,6 +1368,15 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
   return (
     <div className={`voice-channel ${isFullscreen ? 'is-fullscreen' : ''}`} ref={containerRef} onMouseMove={handleFsMouseMove}>
       <div className={`voice-header ${isFullscreen ? (fsShowControls ? 'fs-visible' : 'fs-hidden') : ''}`}>
+        {onToggleChannelSidebar && !isFullscreen && (
+          <button
+            className="sidebar-toggle-btn"
+            onClick={onToggleChannelSidebar}
+            title={channelSidebarCollapsed ? 'Show Channels' : 'Hide Channels'}
+          >
+            {channelSidebarCollapsed ? '»' : '«'}
+          </button>
+        )}
         <span className="voice-header-name">🔊 {channel.name}</span>
         {joined && <span className="voice-status connected">Connected</span>}
         {connecting && <span className="voice-status connecting">Connecting…</span>}
@@ -1354,7 +1387,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         )}
         {onToggleMembers && !isFullscreen && (
           <button
-            className={`chat-header-toggle ${showMembers ? 'active' : ''}`}
+            className={`sidebar-toggle-btn ${showMembers ? 'active' : ''}`}
             onClick={onToggleMembers}
             title={showMembers ? 'Hide Members' : 'Show Members'}
           >

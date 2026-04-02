@@ -139,7 +139,7 @@ export default function UserPopover({ userId, anchorRect, onClose, onMessage, se
         <div className="user-popover-loading">Loading...</div>
       ) : userInfo ? (
         <>
-          <div className="user-popover-banner" style={userInfo.name_color ? { background: `linear-gradient(135deg, ${userInfo.name_color}, var(--bg-tertiary))` } : undefined} />
+          <div className="user-popover-banner" />
           <div className="user-popover-header">
             <span className={`user-popover-status-dot ${userInfo.status === 'online' ? 'online' : 'offline'}`} />
             <div className="user-popover-names">

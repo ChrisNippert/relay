@@ -94,6 +94,7 @@ export const updateServer = (id: string, data: Partial<Pick<Server, 'name' | 'ic
   request<Server>('PUT', `/servers/${encodeURIComponent(id)}`, data)
 export const deleteServer = (id: string) => request<void>('DELETE', `/servers/${encodeURIComponent(id)}`)
 export const leaveServer = (id: string) => request<void>('POST', `/servers/${encodeURIComponent(id)}/leave`)
+export const updateServerPositions = (serverIds: string[]) => request<void>('PUT', '/servers/positions', { server_ids: serverIds })
 export const getMembers = (id: string) => request<ServerMember[]>('GET', `/servers/${encodeURIComponent(id)}/members`)
 export const getOnlineUsers = (id: string) => request<string[]>('GET', `/servers/${encodeURIComponent(id)}/online`)
 export const updateMemberRole = (serverId: string, userId: string, role: string) =>

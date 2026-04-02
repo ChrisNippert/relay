@@ -86,9 +86,9 @@ export default function ChannelSettings({ channel, onClose, onChannelUpdated, on
   }
 
   return (
-    <div className="settings-overlay" onClick={onClose}>
-      <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
-        <div className="settings-header">
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
           <h2>Channel Settings</h2>
           <button className="close-btn" onClick={onClose}>×</button>
         </div>

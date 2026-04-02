@@ -87,6 +87,7 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		r.Get("/api/servers/{serverID}/online", GetOnlineUsersHandler(database, hub))
 		r.Put("/api/servers/{serverID}/members/{userID}/role", UpdateMemberRoleHandler(database, hub))
 		r.Delete("/api/servers/{serverID}/members/{userID}", KickMemberHandler(database, hub))
+		r.Put("/api/servers/positions", UpdateServerPositionsHandler(database))
 
 		// Server invites
 		r.Post("/api/servers/{serverID}/invites", CreateInviteHandler(database))

@@ -45,7 +45,10 @@ export default function Home() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [showMembers, setShowMembers] = useState(true)
   const [channelSidebarCollapsed, setChannelSidebarCollapsed] = useState(false)
-  const [serverSidebarCollapsed, setServerSidebarCollapsed] = useState(false)
+  const [serverWidth, setServerWidth] = useState(160)
+  const [channelWidth, setChannelWidth] = useState(240)
+  const serverResizing = useRef(false)
+  const channelResizing = useRef(false)
   const [unreadChannels, setUnreadChannels] = useState<Record<string, { count: number; mentioned: boolean; serverId?: string }>>({})
   const [dmNames, setDmNames] = useState<Record<string, string>>({})
   const channelServerMapRef = useRef<Record<string, string>>({})
@@ -543,6 +546,34 @@ export default function Home() {
     setActiveVoiceChannel(null)
   }
 
+  // Sidebar drag-to-resize handlers
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (serverResizing.current) {
+        const w = Math.max(60, Math.min(300, e.clientX))
+        setServerWidth(w)
+      }
+      if (channelResizing.current) {
+        const w = Math.max(120, Math.min(500, e.clientX - serverWidth))
+        setChannelWidth(w)
+        if (w <= 120) setChannelSidebarCollapsed(true)
+        else setChannelSidebarCollapsed(false)
+      }
+    }
+    const handleMouseUp = () => {
+      serverResizing.current = false
+      channelResizing.current = false
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [serverWidth])
+
   return (
     <div className="app-layout">
       {dmToasts.length > 0 && (
@@ -579,15 +610,21 @@ export default function Home() {
           })
         }}
         serverUnreads={serverUnreads}
-        collapsed={serverSidebarCollapsed}
-        onToggleCollapse={() => setServerSidebarCollapsed((p) => !p)}
+        onReorder={(ids) => {
+          // Optimistic reorder
+          const ordered = ids.map((id) => servers.find((s) => s.id === id)).filter(Boolean) as Server[]
+          setServers(ordered)
+          api.updateServerPositions(ids).catch(() => {
+            // Revert on failure
+            api.getServers().then(setServers).catch(() => {})
+          })
+        }}
+        width={serverWidth}
       />
+      <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); serverResizing.current = true; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none' }} />
 
-      <div className={`channel-sidebar ${channelSidebarCollapsed ? 'collapsed' : ''}`}>
+      <div className={`channel-sidebar ${channelSidebarCollapsed ? 'collapsed' : ''}`} style={!channelSidebarCollapsed ? { width: channelWidth } : undefined}>
         <div className="channel-sidebar-header">
-          <button className="sidebar-collapse-btn" onClick={() => setChannelSidebarCollapsed(!channelSidebarCollapsed)} title={channelSidebarCollapsed ? 'Expand' : 'Collapse'}>
-            {channelSidebarCollapsed ? '»' : '«'}
-          </button>
           {!channelSidebarCollapsed && (
             <>
               <h2>{view === 'dm' ? 'Direct Messages' : selectedServer?.name}</h2>
@@ -712,6 +749,7 @@ export default function Home() {
           </div>
         </div>
       </div>
+      <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); channelResizing.current = true; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none' }} />
 
       <div className="main-content">
         {/* Persistent voice channel — stays mounted to keep WebRTC alive */}
@@ -725,6 +763,8 @@ export default function Home() {
               isAdmin={isAdmin}
               showMembers={showMembers}
               onToggleMembers={view === 'server' ? () => setShowMembers((p) => !p) : undefined}
+              channelSidebarCollapsed={channelSidebarCollapsed}
+              onToggleChannelSidebar={() => setChannelSidebarCollapsed((p) => !p)}
               onJoin={() => {
                 setActiveVoiceChannel(activeVoiceChannel)
                 syncVoiceControls()
@@ -760,7 +800,8 @@ export default function Home() {
           ) : selectedChannel && !isVoiceChannel ? (
             <ChatView channel={selectedChannel} onStartCall={handleStartDMCall} onDMUser={handleDMUser}
               showMembersToggle={view === 'server'} showMembers={showMembers} onToggleMembers={() => setShowMembers((p) => !p)}
-              isAdmin={isAdmin} serverId={selectedServer?.id} />
+              isAdmin={isAdmin} serverId={selectedServer?.id}
+              channelSidebarCollapsed={channelSidebarCollapsed} onToggleChannelSidebar={() => setChannelSidebarCollapsed((p) => !p)} />
           ) : !selectedChannel ? (
             <div className="no-channel">
               <p>Select a channel to start chatting</p>

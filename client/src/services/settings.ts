@@ -12,7 +12,14 @@ export interface MediaSettings {
   channelCount: 1 | 2        // 1 = mono, 2 = stereo
   noiseGateEnabled: boolean  // client-side noise gate
   noiseGateThreshold: number // 0-100 noise gate threshold
+  noiseGateHold: number      // ms to hold gate open after speech stops (50-1000)
+  noiseGateAttack: number    // ms attack time (1-100)
+  noiseGateRelease: number   // ms release time (10-500)
+  highpassFreq: number       // legacy — unused
+  lowpassFreq: number        // legacy — unused
+  eqBands: { freq: number; gain: number; type: 'peaking' | 'lowpass' | 'highpass' | 'lowshelf' | 'highshelf' }[]
   userVolumes: Record<string, number>  // per-user volume overrides (userId -> 0-200)
+  audioChainOrder: string[]     // order of audio processing nodes ['eq', 'noisegate']
   screenShareResolution: number // 0 = native, 360, 480, 720, 1080, 1440
   screenShareFramerate: number  // 15, 30, 60, 120
   screenShareMaxBitrate: number // 0 = auto, in kbps (e.g. 2500, 5000, 8000, 15000)
@@ -38,7 +45,25 @@ const defaults: MediaSettings = {
   channelCount: 1,
   noiseGateEnabled: false,
   noiseGateThreshold: 15,
+  noiseGateHold: 250,
+  noiseGateAttack: 10,
+  noiseGateRelease: 80,
+  highpassFreq: 0,
+  lowpassFreq: 0,
+  eqBands: [
+    { freq: 31, gain: 0, type: 'highpass' as const },
+    { freq: 63, gain: 0, type: 'peaking' as const },
+    { freq: 125, gain: 0, type: 'peaking' as const },
+    { freq: 250, gain: 0, type: 'peaking' as const },
+    { freq: 500, gain: 0, type: 'peaking' as const },
+    { freq: 1000, gain: 0, type: 'peaking' as const },
+    { freq: 2000, gain: 0, type: 'peaking' as const },
+    { freq: 4000, gain: 0, type: 'peaking' as const },
+    { freq: 8000, gain: 0, type: 'peaking' as const },
+    { freq: 16000, gain: 0, type: 'lowpass' as const },
+  ],
   userVolumes: {},
+  audioChainOrder: ['eq', 'noisegate'],
   screenShareResolution: 0,
   screenShareFramerate: 30,
   screenShareMaxBitrate: 8000,
@@ -52,7 +77,26 @@ const defaults: MediaSettings = {
 export function getSettings(): MediaSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return { ...defaults, ...JSON.parse(raw) }
+    if (raw) {
+      const saved = { ...defaults, ...JSON.parse(raw) } as MediaSettings
+      // Migrate old chain order: replace highpass/lowpass with eq
+      if (saved.audioChainOrder && !saved.audioChainOrder.includes('eq')) {
+        const order = saved.audioChainOrder.filter((n: string) => n !== 'highpass' && n !== 'lowpass')
+        order.unshift('eq')
+        saved.audioChainOrder = order
+      }
+      // Ensure eqBands exists and has type field
+      if (!saved.eqBands || saved.eqBands.length === 0) {
+        saved.eqBands = defaults.eqBands
+      } else {
+        // Migrate old bands without type field
+        saved.eqBands = saved.eqBands.map((b: { freq: number; gain: number; type?: string }) => ({
+          ...b,
+          type: (b.type || 'peaking') as 'peaking' | 'lowpass' | 'highpass' | 'lowshelf' | 'highshelf',
+        }))
+      }
+      return saved
+    }
   } catch { /* ignore */ }
   return { ...defaults }
 }

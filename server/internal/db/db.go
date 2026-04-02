@@ -61,6 +61,8 @@ func (db *DB) migrate() error {
 		`DROP TABLE IF EXISTS channel_master_keys`,
 		// Master key table v2: per-device encrypted copies. Server never sees raw keys.
 		`CREATE TABLE IF NOT EXISTS channel_master_keys (channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE, epoch INTEGER NOT NULL, device_id TEXT NOT NULL, encrypted_key TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (channel_id, epoch, device_id))`,
+		// Server ordering: per-user position for server list drag-reorder
+		`ALTER TABLE server_members ADD COLUMN position INTEGER DEFAULT 0`,
 	}
 	for _, stmt := range alterations {
 		db.Exec(stmt) // intentionally ignore "duplicate column" errors
@@ -139,6 +141,7 @@ CREATE TABLE IF NOT EXISTS server_members (
     server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
     user_id TEXT NOT NULL REFERENCES users(id),
     role TEXT DEFAULT 'member',
+    position INTEGER DEFAULT 0,
     joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (server_id, user_id)
 );

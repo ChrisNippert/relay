@@ -315,3 +315,26 @@ func KickMemberHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
+
+type updateServerPositionsRequest struct {
+	ServerIDs []string `json:"server_ids"`
+}
+
+func UpdateServerPositionsHandler(database *db.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req updateServerPositionsRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+			return
+		}
+		if len(req.ServerIDs) == 0 {
+			http.Error(w, `{"error":"server_ids is required"}`, http.StatusBadRequest)
+			return
+		}
+		if err := database.UpdateServerPositions(GetUserID(r), req.ServerIDs); err != nil {
+			http.Error(w, `{"error":"failed to update positions"}`, http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
