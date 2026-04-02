@@ -75,13 +75,19 @@ export default function Home() {
 
   // Compute unread DMs for server bar
   const unreadDMs: DMEntry[] = dmChannels
-    .filter((ch) => unreadChannels[ch.id] && unreadChannels[ch.id].count > 0)
-    .map((ch) => ({
-      channel: ch,
-      name: dmNames[ch.id] || ch.name || '?',
-      unread: unreadChannels[ch.id]!.count,
-      mentioned: unreadChannels[ch.id]!.mentioned,
-    }))
+    .filter((ch) => {
+      const u = unreadChannels[ch.id]
+      return u && u.count > 0
+    })
+    .map((ch) => {
+      const u = unreadChannels[ch.id]!
+      return {
+        channel: ch,
+        name: dmNames[ch.id] || ch.name || '?',
+        unread: u.count,
+        mentioned: u.mentioned,
+      }
+    })
 
   // Aggregate channel-level unreads into server-level unreads
   const serverUnreads: Record<string, { count: number; mentioned: boolean }> = {}

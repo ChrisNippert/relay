@@ -9,6 +9,8 @@ BUGS
 * For sometimes the noise gate threshold test microphone doesn't show a green bar. Can we always show the green bar even without the test microphone on?
 * Can't join from another device to replace current voice chat join (maybe)
 * When passing a file over the main window and going to some other window, it pops up "drop files here" and doesn't go away until i leave the servers page.
+* Sometimes when people join a voice chat, I get calling notifications
+* WebRTC Calls over DMs don't work at all. They seem to instantly end when trying to join.
 
 
 QOL Stuff
