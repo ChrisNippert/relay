@@ -35,6 +35,7 @@ export default function Home() {
   const [dmCall, setDmCall] = useState<{ userId: string; name: string; channelId: string; video: boolean; incomingOffer?: RTCSessionDescriptionInit } | null>(null)
   const [incomingCall, setIncomingCall] = useState<{ fromUserId: string; fromName: string; channelId: string; offer: RTCSessionDescriptionInit } | null>(null)
   const [activeVoiceChannel, setActiveVoiceChannel] = useState<Channel | null>(null)
+  const activeVoiceChannelRef = useRef<Channel | null>(null)
   const voiceRef = useRef<VoiceChannelHandle>(null)
   const pendingVoiceChannel = useRef<Channel | null>(null)
   const [voiceControls, setVoiceControls] = useState({
@@ -47,6 +48,7 @@ export default function Home() {
   const [unreadChannels, setUnreadChannels] = useState<Record<string, { count: number; mentioned: boolean; serverId?: string }>>({})
   const [dmNames, setDmNames] = useState<Record<string, string>>({})
   const channelServerMapRef = useRef<Record<string, string>>({})
+  const [dmToasts, setDmToasts] = useState<{ id: string; name: string; text: string; channelId: string }[]>([])
 
   // Populate channel→server mapping when servers load
   useEffect(() => {
@@ -128,10 +130,13 @@ export default function Home() {
     }
   }, [activeVoiceChannel])
 
-  // Keep ref in sync for use in WS callback
+  // Keep refs in sync for use in WS callbacks
   useEffect(() => {
     selectedChannelRef.current = selectedChannel
   }, [selectedChannel])
+  useEffect(() => {
+    activeVoiceChannelRef.current = activeVoiceChannel
+  }, [activeVoiceChannel])
 
   // Play sound for messages in other channels + handle incoming DM calls
   useEffect(() => {
@@ -158,6 +163,14 @@ export default function Home() {
             new Notification(title, { body: m.content.slice(0, 100), tag: m.channel_id })
           }
 
+          // In-app DM toast
+          if (isDM) {
+            const author = (m as Message & { author?: { display_name?: string } }).author
+            const toastId = m.id || `${Date.now()}`
+            setDmToasts(prev => [...prev.slice(-4), { id: toastId, name: author?.display_name || 'Someone', text: m.content.slice(0, 80), channelId: m.channel_id }])
+            setTimeout(() => setDmToasts(prev => prev.filter(t => t.id !== toastId)), 5000)
+          }
+
           setUnreadChannels((prev) => {
             const existing = prev[m.channel_id] || { count: 0, mentioned: false }
             const serverId = channelServerMapRef.current[m.channel_id]
@@ -168,7 +181,7 @@ export default function Home() {
         const payload = msg.payload as { from_user_id?: string; channel_id?: string; signal?: RTCSessionDescriptionInit }
         if (payload.from_user_id && payload.from_user_id !== user?.id && !dmCall) {
           // Skip voice channel renegotiation offers
-          if (activeVoiceChannel && payload.channel_id === activeVoiceChannel.id) return
+        if (activeVoiceChannelRef.current && payload.channel_id === activeVoiceChannelRef.current.id) return
           api.getUser(payload.from_user_id).then((u) => {
             setIncomingCall({
               fromUserId: payload.from_user_id!,
@@ -182,7 +195,7 @@ export default function Home() {
       }
     })
     return unsub
-  }, [user?.id, dmCall, activeVoiceChannel?.id])
+  }, [user?.id, dmCall])
 
   // Keep userIdRef in sync
   useEffect(() => { userIdRef.current = user?.id }, [user?.id])
@@ -328,7 +341,7 @@ export default function Home() {
         // Auto-select the first text channel if none selected
         if (!selectedChannel || selectedChannel.server_id !== selectedServer.id) {
           const firstText = chs.find((c) => c.type === 'text')
-          if (firstText) setSelectedChannel(firstText)
+          if (firstText) handleSelectChannel(firstText)
         }
       }).catch(console.error)
       // Determine admin status
@@ -531,6 +544,19 @@ export default function Home() {
 
   return (
     <div className="app-layout">
+      {dmToasts.length > 0 && (
+        <div className="dm-toast-container">
+          {dmToasts.map(t => (
+            <div key={t.id} className="dm-toast" onClick={() => {
+              setDmToasts(prev => prev.filter(x => x.id !== t.id))
+              const ch = dmChannels.find(c => c.id === t.channelId)
+              if (ch) { setSelectedServer(null); setView('dm'); handleSelectChannel(ch) }
+            }}>
+              <strong>{t.name}</strong>: {t.text}
+            </div>
+          ))}
+        </div>
+      )}
       <ServerList
         servers={servers}
         selected={selectedServer}
@@ -666,14 +692,7 @@ export default function Home() {
 
         <div className="user-panel">
           <div className="user-panel-info">
-            <div className="user-panel-avatar">
-              {user?.avatar_url ? (
-                <img src={user.avatar_url} alt="" className="user-panel-avatar-img" />
-              ) : (
-                <span className="user-panel-avatar-fallback">{user?.display_name?.[0]?.toUpperCase() ?? '?'}</span>
-              )}
-              <span className="user-panel-status-dot online" />
-            </div>
+            <span className="user-panel-status-dot online" />
             <div className="user-panel-names">
               <span className="user-panel-display" style={user?.name_color ? { color: user.name_color } : undefined}>
                 {user?.display_name}
@@ -703,7 +722,22 @@ export default function Home() {
               isAdmin={isAdmin}
               showMembers={showMembers}
               onToggleMembers={view === 'server' ? () => setShowMembers((p) => !p) : undefined}
-              onJoin={() => { setActiveVoiceChannel(activeVoiceChannel); syncVoiceControls() }}
+              onJoin={() => {
+                setActiveVoiceChannel(activeVoiceChannel)
+                syncVoiceControls()
+                // Refresh voice presence so sidebar shows us immediately
+                if (activeVoiceChannel && user) {
+                  api.getVoiceUsers(activeVoiceChannel.id).then(async (userIds) => {
+                    const users: VoicePresenceUser[] = await Promise.all(
+                      (userIds || []).map(async (uid) => {
+                        try { const u = await api.getUser(uid); return { id: uid, displayName: u.display_name } }
+                        catch { return { id: uid, displayName: uid.slice(0, 8) } }
+                      })
+                    )
+                    setVoicePresence((prev) => { const next = new Map(prev); next.set(activeVoiceChannel.id, users); return next })
+                  }).catch(() => {})
+                }
+              }}
               onLeave={handleVoiceLeave}
             />
           </div>

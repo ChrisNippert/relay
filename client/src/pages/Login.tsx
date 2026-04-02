@@ -1,11 +1,9 @@
 import { useState, type FormEvent } from 'react'
 import { useAuth } from '../context/AuthContext'
-import { getServerUrl, setServerUrl } from '../services/api'
 
 export default function Login() {
   const { login, register } = useAuth()
   const [isRegister, setIsRegister] = useState(false)
-  const [server, setServer] = useState(getServerUrl())
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [username, setUsername] = useState('')
@@ -15,7 +13,6 @@ export default function Login() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError('')
-    setServerUrl(server)
     try {
       if (isRegister) {
         await register(username, email, password, displayName || username)
@@ -34,17 +31,6 @@ export default function Login() {
         <p className="login-subtitle">{isRegister ? 'Create an account' : 'Welcome back'}</p>
 
         <form onSubmit={handleSubmit}>
-          <label>
-            Server
-            <input
-              type="text"
-              value={server}
-              onChange={(e) => setServer(e.target.value)}
-              placeholder="https://chat.example.com"
-              autoComplete="url"
-            />
-          </label>
-
           {isRegister && (
             <>
               <label>

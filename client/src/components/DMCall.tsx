@@ -35,10 +35,27 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
   const containerRef = useRef<HTMLDivElement>(null)
   const connectedRef = useRef(false)
   const primaryStreamIdRef = useRef<string | null>(null)
+  const mountedRef = useRef(false)
+  const cleanedUpRef = useRef(false)
+  const initRef = useRef(false)
 
   useEffect(() => {
-    startCall(incomingOffer)
-    return () => { cleanupCall() }
+    mountedRef.current = true
+    if (!initRef.current) {
+      initRef.current = true
+      cleanedUpRef.current = false
+      startCall(incomingOffer)
+    }
+    return () => {
+      mountedRef.current = false
+      // Defer cleanup to avoid StrictMode double-mount sending call_end
+      setTimeout(() => {
+        if (!mountedRef.current) {
+          cleanupCall()
+          initRef.current = false
+        }
+      }, 50)
+    }
   }, [])
 
   // Fullscreen change listener
@@ -217,6 +234,8 @@ export default function DMCall({ targetUserId, targetName, channelId, startWithV
   }
 
   function cleanupCall() {
+    if (cleanedUpRef.current) return
+    cleanedUpRef.current = true
     sendCallEnd(targetUserId, channelId)
     pcRef.current?.close()
     pcRef.current = null

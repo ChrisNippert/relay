@@ -215,7 +215,14 @@ export function uploadFile(
         }
       } else {
         let msg = xhr.responseText
-        try { const p = JSON.parse(msg); if (p.error) msg = p.error } catch {}
+        try { const p = JSON.parse(msg); if (p.error) msg = p.error } catch {
+          // Handle HTML error pages (e.g., nginx 413)
+          if (xhr.status === 413) {
+            msg = `File too large — server rejected the upload (${sizeMB.toFixed(1)} MB)`
+          } else if (msg.includes('<html') || msg.includes('<!DOCTYPE')) {
+            msg = `Upload failed (HTTP ${xhr.status})`
+          }
+        }
         reject(new Error(msg || `Upload failed (HTTP ${xhr.status})`))
       }
     })
@@ -228,8 +235,13 @@ export function uploadFile(
       reject(new Error('Upload cancelled'))
     })
 
+    xhr.addEventListener('timeout', () => {
+      reject(new Error(`Upload timed out for ${file.name} (${sizeMB.toFixed(1)} MB)`))
+    })
+
     xhr.open('POST', `${getBase()}/upload`)
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.timeout = 120000
     xhr.send(form)
   })
 }

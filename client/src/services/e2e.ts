@@ -1085,3 +1085,42 @@ async function doRotation(channelId: string, targetEpoch: number): Promise<boole
   e2eLog(`✅ Key rotated: channel=${channelId.slice(0,8)}… now at epoch ${targetEpoch}`)
   return true
 }
+
+/**
+ * Encrypt a file (ArrayBuffer) for an E2EE channel.
+ * Format: [4 bytes epoch big-endian][12 bytes IV][AES-GCM ciphertext]
+ * Returns null if channel has no key.
+ */
+export async function encryptFile(channelId: string, data: ArrayBuffer): Promise<ArrayBuffer | null> {
+  const epoch = await getCurrentEpoch(channelId)
+  if (epoch < 0) return null
+  const key = await getChannelKeyForEpoch(channelId, epoch)
+  if (!key) return null
+  const iv = globalThis.crypto.getRandomValues(new Uint8Array(12))
+  const encrypted = await globalThis.crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data)
+  const result = new Uint8Array(4 + 12 + encrypted.byteLength)
+  new DataView(result.buffer).setUint32(0, epoch, false)
+  result.set(iv, 4)
+  result.set(new Uint8Array(encrypted), 16)
+  return result.buffer as ArrayBuffer
+}
+
+/**
+ * Decrypt a file (ArrayBuffer) from an E2EE channel.
+ * Reads the epoch from the first 4 bytes and uses the corresponding key.
+ * Returns null if decryption fails or key is missing.
+ */
+export async function decryptFile(channelId: string, data: ArrayBuffer): Promise<ArrayBuffer | null> {
+  if (data.byteLength < 16) return null
+  const epoch = new DataView(data).getUint32(0, false)
+  const iv = new Uint8Array(data, 4, 12)
+  const ciphertext = new Uint8Array(data, 16)
+  const key = await getChannelKeyForEpoch(channelId, epoch)
+  if (!key) { e2eWarn(`decryptFile: missing key for epoch ${epoch}`); return null }
+  try {
+    return await globalThis.crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext)
+  } catch (err) {
+    e2eWarn('decryptFile: decryption failed', err)
+    return null
+  }
+}

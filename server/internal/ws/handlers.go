@@ -385,6 +385,33 @@ func handleVoiceJoin(c *Client, payload json.RawMessage) {
 		return
 	}
 
+	// Auto-leave any previous voice channels (supports device replacement)
+	prevChannels := c.hub.VoiceLeaveAll(c.userID)
+	for _, chID := range prevChannels {
+		if chID == p.ChannelID {
+			continue // Will rejoin below
+		}
+		users := c.hub.VoiceUsers(chID)
+		stateMsg := WSMessage{
+			Type: "voice_state",
+			Payload: json.RawMessage(mustMarshal(map[string]interface{}{
+				"channel_id": chID,
+				"user_ids":   users,
+			})),
+		}
+		c.hub.SendToChannel(chID, mustMarshal(stateMsg), "")
+
+		// Notify remaining users to drop calls with this user
+		endMsg := WSMessage{
+			Type: "call_end",
+			Payload: json.RawMessage(mustMarshal(map[string]interface{}{
+				"from_user_id": c.userID,
+				"channel_id":   chID,
+			})),
+		}
+		c.hub.SendToChannel(chID, mustMarshal(endMsg), c.userID)
+	}
+
 	users := c.hub.VoiceJoin(p.ChannelID, c.userID)
 
 	// Broadcast updated voice state to the channel

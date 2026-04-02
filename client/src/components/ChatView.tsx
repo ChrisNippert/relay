@@ -242,6 +242,55 @@ function LinkEmbed({ url, onImageLoad }: { url: string; onImageLoad?: () => void
   )
 }
 
+function EncryptedAttachment({ attachmentId, channelId, filename, onLoad }: { attachmentId: string; channelId: string; filename: string; onLoad?: () => void }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null)
+  const [error, setError] = useState(false)
+  const origName = filename.replace(/\.enc$/, '')
+  const ext = origName.split('.').pop()?.toLowerCase() || ''
+  const imgExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico']
+  const vidExts = ['mp4', 'webm', 'ogg', 'mov']
+  const audExts = ['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a']
+  const isImage = imgExts.includes(ext)
+  const isVideo = vidExts.includes(ext)
+  const isAudio = audExts.includes(ext)
+
+  useEffect(() => {
+    let revoked = false
+    ;(async () => {
+      try {
+        const res = await fetch(api.fileURL(attachmentId))
+        if (!res.ok) { setError(true); return }
+        const encBytes = await res.arrayBuffer()
+        const dec = await e2e.decryptFile(channelId, encBytes)
+        if (!dec || revoked) { if (!dec) setError(true); return }
+        const mimeMap: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', mp4: 'video/mp4', webm: 'video/webm', ogg: 'application/ogg', mov: 'video/quicktime', mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', aac: 'audio/aac', m4a: 'audio/mp4' }
+        const mime = mimeMap[ext] || 'application/octet-stream'
+        const url = URL.createObjectURL(new Blob([dec], { type: mime }))
+        if (!revoked) setBlobUrl(url)
+        else URL.revokeObjectURL(url)
+      } catch { setError(true) }
+    })()
+    return () => { revoked = true }
+  }, [attachmentId, channelId, ext])
+
+  useEffect(() => { return () => { if (blobUrl) URL.revokeObjectURL(blobUrl) } }, [blobUrl])
+
+  if (error) return <span className="attachment-link">🔒 {origName} (decryption failed)</span>
+  if (!blobUrl) return <span className="attachment-link">🔒 Decrypting {origName}…</span>
+  if (isImage) return (
+    <a href={blobUrl} target="_blank" rel="noreferrer">
+      <img src={blobUrl} alt={origName} className="attachment-image" onLoad={onLoad} />
+    </a>
+  )
+  if (isVideo) return <video src={blobUrl} controls className="attachment-video" />
+  if (isAudio) return <audio src={blobUrl} controls className="attachment-audio" />
+  return (
+    <a href={blobUrl} download={origName} className="attachment-link">
+      🔒 📎 {origName}
+    </a>
+  )
+}
+
 export default function ChatView({ channel, onStartCall, onDMUser, showMembersToggle, showMembers, onToggleMembers, isAdmin, serverId: _serverId }: Props) {
   const { user } = useAuth()
   const [messages, setMessages] = useState<Message[]>([])
@@ -285,6 +334,10 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
   const userNameCache = useRef<Map<string, string>>(new Map())
   const pendingCountRef = useRef(0)
   const seenMsgIds = useRef(new Set<string>())
+  const encryptedRef = useRef(false)
+  const channelIdRef = useRef(channel.id)
+  encryptedRef.current = encrypted
+  channelIdRef.current = channel.id
 
   // Resolve DM partner for call buttons and header name
   useEffect(() => {
@@ -473,6 +526,8 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     pendingCountRef.current = 0
     setInitialScrollDone(false)
     initialLoadRef.current = true
+    // Auto-focus the message input when switching channels
+    setTimeout(() => inputRef.current?.focus(), 0)
     api.getMessages(channel.id).then(async (msgs) => {
       if (stale) return
       const ordered = msgs.reverse()
@@ -900,9 +955,25 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     // Fire uploads outside the state updater to avoid duplicate calls in StrictMode
     newEntries.forEach((entry, offset) => {
       const idx = baseIdx + offset
-      api.uploadFile(entry.file, (pct) => {
-        setPendingFiles(cur => cur.map((f, i) => i === idx ? { ...f, progress: pct } : f))
-      }).then(res => {
+      const doUpload = async () => {
+        let fileToUpload = entry.file
+        // Encrypt file if channel has E2EE enabled
+        if (encryptedRef.current) {
+          try {
+            const buf = await entry.file.arrayBuffer()
+            const enc = await e2e.encryptFile(channelIdRef.current, buf)
+            if (enc) {
+              fileToUpload = new File([enc], entry.file.name + '.enc', { type: 'application/octet-stream' })
+            }
+          } catch (err) {
+            console.error('File encryption failed:', err)
+          }
+        }
+        return api.uploadFile(fileToUpload, (pct) => {
+          setPendingFiles(cur => cur.map((f, i) => i === idx ? { ...f, progress: pct } : f))
+        })
+      }
+      doUpload().then(res => {
         setPendingFiles(cur => cur.map((f, i) => i === idx ? { ...f, id: res.id, progress: 100 } : f))
       }).catch((err) => {
         const msg = err?.message || 'Upload failed'
@@ -946,7 +1017,10 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     e.preventDefault()
     e.stopPropagation()
     dragCounter.current--
-    if (dragCounter.current === 0) setDragging(false)
+    if (dragCounter.current <= 0) {
+      dragCounter.current = 0
+      setDragging(false)
+    }
   }
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -963,6 +1037,28 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
       startUpload(Array.from(e.dataTransfer.files))
     }
   }
+
+  // Reset drag overlay when window loses focus or drag leaves the document
+  useEffect(() => {
+    const resetDrag = () => {
+      dragCounter.current = 0
+      setDragging(false)
+    }
+    const handleDocDragLeave = (e: DragEvent) => {
+      // Only reset if dragging out of the window (relatedTarget is null)
+      if (e.relatedTarget === null && (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight)) {
+        resetDrag()
+      }
+    }
+    window.addEventListener('blur', resetDrag)
+    document.addEventListener('dragleave', handleDocDragLeave)
+    document.addEventListener('dragend', resetDrag)
+    return () => {
+      window.removeEventListener('blur', resetDrag)
+      document.removeEventListener('dragleave', handleDocDragLeave)
+      document.removeEventListener('dragend', resetDrag)
+    }
+  }, [])
 
   const removePendingFile = (index: number) => {
     setPendingFiles((prev) => prev.filter((_, i) => i !== index))
@@ -1200,6 +1296,9 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                 {!m.deleted && m.attachments && m.attachments.length > 0 && (
                   <div className="message-attachments">
                     {m.attachments.map((a) => {
+                      if (a.filename.endsWith('.enc')) {
+                        return <EncryptedAttachment key={a.id} attachmentId={a.id} channelId={channel.id} filename={a.filename} onLoad={handleMediaLoad} />
+                      }
                       const isImage = /^image\//i.test(a.mime_type)
                       const isVideo = /^video\//i.test(a.mime_type)
                       const isAudio = /^audio\//i.test(a.mime_type)
@@ -1455,6 +1554,9 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                   <div className="history-entry-time">Attachments</div>
                   <div className="history-entry-attachments">
                     {historyMsg.attachments.map((a) => {
+                      if (a.filename.endsWith('.enc')) {
+                        return <EncryptedAttachment key={a.id} attachmentId={a.id} channelId={channel.id} filename={a.filename} />
+                      }
                       const isImage = /^image\//i.test(a.mime_type)
                       return isImage ? (
                         <a key={a.id} href={api.fileURL(a.id)} target="_blank" rel="noreferrer">

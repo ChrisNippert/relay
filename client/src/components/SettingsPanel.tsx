@@ -37,6 +37,7 @@ export default function SettingsPanel({ onClose }: Props) {
   const [micLevel, setMicLevel] = useState(0)
   const micTestCtxRef = useRef<AudioContext | null>(null)
   const micTestAnimRef = useRef<number>(0)
+  const micMonitorRef = useRef<{ stream: MediaStream; ctx: AudioContext; anim: number } | null>(null)
 
   // E2E device approval state
   const [e2eDevices, setE2eDevices] = useState<Device[]>([])
@@ -87,6 +88,63 @@ export default function SettingsPanel({ onClose }: Props) {
       micTestCtxRef.current?.close()
     }
   }, [micTestStream])
+
+  // Auto mic level monitoring when noise gate is enabled and on media tab (no loopback)
+  useEffect(() => {
+    if (tab !== 'media' || !settings.noiseGateEnabled || micTestStream) {
+      // Stop monitor if conditions not met or mic test is active (it provides its own level)
+      if (micMonitorRef.current) {
+        cancelAnimationFrame(micMonitorRef.current.anim)
+        micMonitorRef.current.stream.getTracks().forEach(t => t.stop())
+        micMonitorRef.current.ctx.close()
+        micMonitorRef.current = null
+        if (!micTestStream) setMicLevel(0)
+      }
+      return
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const curSettings = getSettings()
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            noiseSuppression: curSettings.noiseSuppression,
+            echoCancellation: false,
+            autoGainControl: curSettings.autoGainControl,
+            ...(curSettings.audioInputDevice ? { deviceId: { exact: curSettings.audioInputDevice } } : {}),
+          },
+        })
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return }
+        const ctx = new AudioContext()
+        if (ctx.state === 'suspended') await ctx.resume()
+        const source = ctx.createMediaStreamSource(stream)
+        const analyser = ctx.createAnalyser()
+        analyser.fftSize = 256
+        analyser.smoothingTimeConstant = 0.3
+        source.connect(analyser)
+        const dataArray = new Uint8Array(analyser.frequencyBinCount)
+        const check = () => {
+          analyser.getByteFrequencyData(dataArray)
+          let sum = 0
+          for (let i = 0; i < dataArray.length; i++) sum += dataArray[i]!
+          const avg = sum / dataArray.length
+          const normalized = Math.min((avg / 60) * 100, 100)
+          setMicLevel(normalized)
+          if (!cancelled) micMonitorRef.current!.anim = requestAnimationFrame(check)
+        }
+        micMonitorRef.current = { stream, ctx, anim: requestAnimationFrame(check) }
+      } catch { /* mic not available */ }
+    })()
+    return () => {
+      cancelled = true
+      if (micMonitorRef.current) {
+        cancelAnimationFrame(micMonitorRef.current.anim)
+        micMonitorRef.current.stream.getTracks().forEach(t => t.stop())
+        micMonitorRef.current.ctx.close()
+        micMonitorRef.current = null
+      }
+    }
+  }, [tab, settings.noiseGateEnabled, micTestStream, settings.audioInputDevice])
 
   const toggleMicTest = async () => {
     if (micTestStream) {
@@ -220,16 +278,7 @@ export default function SettingsPanel({ onClose }: Props) {
         {tab === 'profile' && (
           <div className="settings-body">
             <div className="profile-preview-card">
-              <div className="profile-preview-avatar">
-                {user?.avatar_url ? (
-                  <img src={user.avatar_url} alt="" className="profile-preview-avatar-img" />
-                ) : (
-                  <span className="profile-preview-avatar-fallback">
-                    {(displayName || user?.display_name)?.[0]?.toUpperCase() ?? '?'}
-                  </span>
-                )}
-                <span className="profile-preview-status-dot online" />
-              </div>
+              <span className="profile-preview-status-dot online" />
               <div className="profile-preview-info">
                 <span className="profile-preview-name" style={{ color: nameColor || 'var(--text-primary)' }}>
                   {displayName || user?.display_name || 'Display Name'}

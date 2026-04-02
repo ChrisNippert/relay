@@ -289,24 +289,31 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     }
   }
 
-  // Voice activity detection for local mic + noise gate
+  // Voice activity detection for local mic + noise gate + audio processing
   function startVoiceActivityDetection(stream: MediaStream) {
     try {
       const ctx = new AudioContext()
       audioContextRef.current = ctx
       const source = ctx.createMediaStreamSource(stream)
 
+      // High-pass filter to remove low-frequency rumble (keyboard, mouse clicks, desk vibrations)
+      const highpass = ctx.createBiquadFilter()
+      highpass.type = 'highpass'
+      highpass.frequency.value = 80
+      highpass.Q.value = 0.7
+      source.connect(highpass)
+
       const analyser = ctx.createAnalyser()
       analyser.fftSize = 512
       analyser.smoothingTimeConstant = 0.6
-      source.connect(analyser)
+      highpass.connect(analyser)
       analyserRef.current = analyser
 
       // Always set up noise gate chain (gain node) so it can be toggled dynamically
       const gain = ctx.createGain()
       gain.gain.value = 1
       gainNodeRef.current = gain
-      source.connect(gain)
+      highpass.connect(gain)
       const dest = ctx.createMediaStreamDestination()
       gain.connect(dest)
       // Replace the audio track in the stream and all peer connections

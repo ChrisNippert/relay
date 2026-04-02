@@ -103,6 +103,23 @@ export async function decrypt(key: CryptoKey, ciphertext: string, nonce: string)
   return new TextDecoder().decode(decrypted)
 }
 
+// Encrypt an ArrayBuffer with AES-256-GCM, returns IV prepended to ciphertext
+export async function encryptBlob(key: CryptoKey, data: ArrayBuffer): Promise<ArrayBuffer> {
+  const iv = crypto.getRandomValues(new Uint8Array(12))
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data)
+  const result = new Uint8Array(iv.byteLength + encrypted.byteLength)
+  result.set(iv)
+  result.set(new Uint8Array(encrypted), iv.byteLength)
+  return result.buffer as ArrayBuffer
+}
+
+// Decrypt an ArrayBuffer (IV-prepended ciphertext) with AES-256-GCM
+export async function decryptBlob(key: CryptoKey, data: ArrayBuffer): Promise<ArrayBuffer> {
+  const iv = data.slice(0, 12)
+  const ciphertext = data.slice(12)
+  return crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(iv) }, key, ciphertext)
+}
+
 // Derive the public key (base64) from a private key JWK string
 export async function publicKeyFromPrivate(privateKeyJwk: string): Promise<string> {
   const jwk = JSON.parse(privateKeyJwk)
