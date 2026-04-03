@@ -1,7 +1,6 @@
 # NOTE - NEVER EDIT THIS FILE IT ONLY GETS EDITED BY HAND
 # BUGS
-* Align the server name with the channel name in the main pane
-
+<!-- * Align the server name with the channel name in the main pane -->
 
 
 # QOL Stuff
@@ -9,9 +8,6 @@
 * Add Camera settings support, for things like auto-color correction, iso, shutter speed, brightness, resolution, and the like
 
 # UI QOL
-
-# Big Todos
-* Make A mobile web version
 
 # TODOs later
 * Images in encrypted channels are not encrypted
@@ -87,3 +83,5 @@
 * Message box seems to draw over members and such when window is thin
 * Emoji window should pop up on the right side
 * When window size is large, settings page does not take up as much more space than when it is small.
+* Add a oled theme and a couple gradient themes that look fancy, some light, some dark, and ranging from cool fruity to sky spacy
+* Maybe a theme creator lil thing as well

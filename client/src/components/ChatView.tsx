@@ -302,7 +302,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
   const [dmPartnerName, setDmPartnerName] = useState<string>('')
   const [initialScrollDone, setInitialScrollDone] = useState(false)
   const [pendingFiles, setPendingFiles] = useState<{file: File; id?: string; progress: number; error?: string}[]>([])
-  const [uploading, setUploading] = useState(false)
+  const [, setUploading] = useState(false)
   const [loadingOlder, setLoadingOlder] = useState(false)
   const [hasMore, setHasMore] = useState(true)
   const [replyingTo, setReplyingTo] = useState<Message | null>(null)
@@ -326,6 +326,8 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
   const [searchResults, setSearchResults] = useState<Message[] | null>(null)
   const [searchLoading, setSearchLoading] = useState(false)
   const [showEmojiPicker, setShowEmojiPicker] = useState(false)
+  const [tappedMsgId, setTappedMsgId] = useState<string | null>(null)
+  const emojiPickerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const isAtBottomRef = useRef(true)
@@ -1114,6 +1116,20 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
     }
   }
 
+  // Close emoji picker on outside click/touch
+  useEffect(() => {
+    if (!showEmojiPicker) return
+    const handler = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as HTMLElement
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(target) && !target.closest('.emoji-btn')) {
+        setShowEmojiPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    document.addEventListener('touchstart', handler)
+    return () => { document.removeEventListener('mousedown', handler); document.removeEventListener('touchstart', handler) }
+  }, [showEmojiPicker])
+
   return (
     <div className={`chat-view${dragging ? ' drag-over' : ''}`}
       onDragEnter={handleDragEnter}
@@ -1218,9 +1234,14 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
           return (
             <div
               key={m.id}
-              className={`message ${m.user_id === user?.id ? 'own' : ''} ${isGrouped ? 'grouped' : ''}${isMentioned ? ' mentioned' : ''}${isReplyToSelf && m.user_id !== user?.id ? ' replied-to-self' : ''}`}
+              className={`message ${m.user_id === user?.id ? 'own' : ''} ${isGrouped ? 'grouped' : ''}${isMentioned ? ' mentioned' : ''}${isReplyToSelf && m.user_id !== user?.id ? ' replied-to-self' : ''}${tappedMsgId === m.id ? ' mobile-active' : ''}`}
               ref={el => { messageRefs.current[m.id] = el }}
               data-msgid={m.id}
+              onClick={(e) => {
+                if (!(e.target as HTMLElement).closest('a, button, .msg-action-btn, .message-author, .emoji-picker')) {
+                  setTappedMsgId(prev => prev === m.id ? null : m.id)
+                }
+              }}
             >
               <div className="message-actions">
                 <button className="msg-action-btn" onClick={() => handleReply(m)} title="Reply">↩</button>
@@ -1420,7 +1441,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
 
       <div className="input-wrapper">
         {showEmojiPicker && (
-          <div className="emoji-picker">
+          <div className="emoji-picker" ref={emojiPickerRef}>
             {[
               { cat: 'Smileys', emojis: ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','😊','😇','🥰','😍','🤩','😘','😋','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','😐','😑','😶','😏','😒','🙄','😬','😮‍💨','🤥','😌','😔','😪','🤤','😴','😷','🤒','🤕','🤮','🥴','😵','🤯','🥳','🥸','😎','🤓','🧐'] },
               { cat: 'Gestures', emojis: ['👋','🤚','🖐️','✋','🖖','👌','🤌','🤏','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','👇','☝️','👍','👎','✊','👊','🤛','🤜','👏','🙌','👐','🤲','🤝','🙏'] },
@@ -1542,7 +1563,6 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
               😀
             </button>
           </div>
-          <button type="submit" className="message-send-btn" disabled={uploading || pendingFiles.some(f => !f.id && !f.error)}>{pendingFiles.some(f => !f.id && !f.error) ? 'Uploading…' : 'Send'}</button>
         </form>
       </div>
 

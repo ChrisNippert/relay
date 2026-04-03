@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { getSettings, saveSettings, getDevices, defaults as settingsDefaults, type MediaSettings, THEME_PRESETS, getThemeId, saveThemeId, applyTheme } from '../services/settings'
+import { getSettings, saveSettings, getDevices, defaults as settingsDefaults, type MediaSettings, THEME_PRESETS, getThemeId, saveThemeId, applyTheme, getAllThemes, getCustomThemes, saveCustomThemes, type Theme, type ThemeColors, getTextSettings, saveTextSettings, applyTextSettings, type TextSettings, FONT_OPTIONS, DEFAULT_TEXT_SETTINGS } from '../services/settings'
 import { useAuth } from '../context/AuthContext'
 import * as api from '../services/api'
 import type { Device } from '../types'
@@ -34,11 +34,15 @@ export default function SettingsPanel({ onClose }: Props) {
   const [profileSaved, setProfileSaved] = useState(false)
   const [tab, setTab] = useState<'profile' | 'audio-stack' | 'video' | 'theme' | 'devices' | 'notifications'>('profile')
   const [activeTheme, setActiveTheme] = useState(getThemeId)
+  const [customThemes, setCustomThemes] = useState<Theme[]>(getCustomThemes)
+  const [editingTheme, setEditingTheme] = useState<Theme | null>(null)
+  const [textSettings, setTextSettingsState] = useState<TextSettings>(getTextSettings)
   const [micTestStream, setMicTestStream] = useState<MediaStream | null>(null)
   const [, setMicLevel] = useState(0)
   const [expandedNode, setExpandedNode] = useState<string | null>(null)
   const [draggedNode, setDraggedNode] = useState<string | null>(null)
   const [eqContextMenu, setEqContextMenu] = useState<{ x: number; y: number; bandIdx: number } | null>(null)
+  const eqLongPressRef = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [cameraCapabilities, setCameraCapabilities] = useState<Record<string, unknown> | null>(null)
   const micTestCtxRef = useRef<AudioContext | null>(null)
   const micTestAnimRef = useRef<number>(0)
@@ -692,6 +696,30 @@ export default function SettingsPanel({ onClose }: Props) {
     setEqContextMenu(null)
   }
 
+  const handleSpectrumTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = spectrumCanvasRef.current
+    if (!canvas) return
+    const touch = e.touches[0]
+    if (!touch) return
+    const rect = canvas.getBoundingClientRect()
+    const x = touch.clientX - rect.left
+    const y = touch.clientY - rect.top
+    const w = rect.width, h = rect.height
+    const bands = settings.eqBands || []
+    for (let i = 0; i < bands.length; i++) {
+      const band = bands[i]!
+      const bx = spectrumFreqToX(band.freq, w)
+      const by = spectrumDbToY(band.gain, h)
+      if (Math.sqrt((x - bx) ** 2 + (y - by) ** 2) < 24) {
+        const cx = touch!.clientX, cy = touch!.clientY
+        eqLongPressRef.current = setTimeout(() => {
+          setEqContextMenu({ x: cx, y: cy, bandIdx: i })
+        }, 500)
+        return
+      }
+    }
+  }
+
   // EQ Export (EqualizerAPO format)
   const handleEqExport = () => {
     const bands = settings.eqBands || []
@@ -1132,9 +1160,9 @@ export default function SettingsPanel({ onClose }: Props) {
         )}
         {tab === 'theme' && (
           <div className="settings-body">
-            <h3 className="settings-section">Theme</h3>
+            <h3 className="settings-section">Themes</h3>
             <div className="theme-grid">
-              {THEME_PRESETS.map((theme) => (
+              {getAllThemes().map((theme) => (
                 <button
                   key={theme.id}
                   className={`theme-card ${activeTheme === theme.id ? 'selected' : ''}`}
@@ -1150,7 +1178,7 @@ export default function SettingsPanel({ onClose }: Props) {
                       <div className="theme-preview-dot" style={{ background: theme.colors['--text-muted'] }} />
                       <div className="theme-preview-dot" style={{ background: theme.colors['--text-muted'] }} />
                     </div>
-                    <div className="theme-preview-main" style={{ background: theme.colors['--bg-primary'] }}>
+                    <div className="theme-preview-main" style={{ background: theme.gradient || theme.colors['--bg-primary'] }}>
                       <div className="theme-preview-msg" style={{ background: theme.colors['--bg-secondary'], borderColor: theme.colors['--border'] }} />
                       <div className="theme-preview-msg" style={{ background: theme.colors['--bg-secondary'], borderColor: theme.colors['--border'] }} />
                       <div className="theme-preview-input" style={{ background: theme.colors['--bg-input'], borderColor: theme.colors['--border'] }} />
@@ -1158,8 +1186,207 @@ export default function SettingsPanel({ onClose }: Props) {
                   </div>
                   <span className="theme-card-name">{theme.name}</span>
                   {activeTheme === theme.id && <span className="theme-card-check">✓</span>}
+                  {customThemes.some((c) => c.id === theme.id) && (
+                    <span className="theme-card-actions">
+                      <button className="theme-action-btn" title="Edit" onClick={(e) => { e.stopPropagation(); setEditingTheme({ ...theme, colors: { ...theme.colors } }) }}>✎</button>
+                      <button className="theme-action-btn theme-action-delete" title="Delete" onClick={(e) => {
+                        e.stopPropagation()
+                        const next = customThemes.filter((c) => c.id !== theme.id)
+                        setCustomThemes(next)
+                        saveCustomThemes(next)
+                        if (activeTheme === theme.id) {
+                          setActiveTheme('default')
+                          saveThemeId('default')
+                          applyTheme(THEME_PRESETS[0]!)
+                        }
+                      }}>✕</button>
+                    </span>
+                  )}
                 </button>
               ))}
+            </div>
+
+            <h3 className="settings-section" style={{ marginTop: 24 }}>
+              {editingTheme ? (editingTheme.id.startsWith('custom-') && !customThemes.some((c) => c.id === editingTheme.id) ? 'Create Theme' : 'Edit Theme') : 'Create Theme'}
+            </h3>
+            {!editingTheme ? (
+              <button className="theme-create-btn" onClick={() => {
+                const base = getAllThemes().find((t) => t.id === activeTheme) || THEME_PRESETS[0]!
+                setEditingTheme({
+                  id: `custom-${Date.now()}`,
+                  name: 'My Theme',
+                  gradient: base.gradient,
+                  colors: { ...base.colors },
+                })
+              }}>+ New Theme from Current</button>
+            ) : (
+              <div className="theme-editor">
+                <div className="theme-editor-row">
+                  <label>Name</label>
+                  <input
+                    type="text"
+                    value={editingTheme.name}
+                    onChange={(e) => setEditingTheme({ ...editingTheme, name: e.target.value })}
+                    className="theme-editor-input"
+                    maxLength={30}
+                  />
+                </div>
+                <div className="theme-editor-row">
+                  <label>Gradient Background</label>
+                  <input
+                    type="text"
+                    value={editingTheme.gradient || ''}
+                    onChange={(e) => setEditingTheme({ ...editingTheme, gradient: e.target.value || undefined })}
+                    className="theme-editor-input"
+                    placeholder="e.g. linear-gradient(135deg, #0a0a1a, #1a1a2e)"
+                  />
+                  {editingTheme.gradient && (
+                    <div className="theme-editor-gradient-preview" style={{ background: editingTheme.gradient }} />
+                  )}
+                </div>
+                <div className="theme-editor-colors">
+                  {(Object.keys(editingTheme.colors) as (keyof ThemeColors)[]).map((key) => (
+                    <div className="theme-color-field" key={key}>
+                      <input
+                        type="color"
+                        value={editingTheme.colors[key]}
+                        onChange={(e) => {
+                          const updated = { ...editingTheme, colors: { ...editingTheme.colors, [key]: e.target.value } }
+                          setEditingTheme(updated)
+                          applyTheme(updated)
+                        }}
+                      />
+                      <span className="theme-color-label">{key.replace('--', '').replace(/-/g, ' ')}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="theme-editor-actions">
+                  <button className="theme-save-btn" onClick={() => {
+                    const existing = customThemes.findIndex((c) => c.id === editingTheme.id)
+                    let next: Theme[]
+                    if (existing >= 0) {
+                      next = [...customThemes]
+                      next[existing] = editingTheme
+                    } else {
+                      next = [...customThemes, editingTheme]
+                    }
+                    setCustomThemes(next)
+                    saveCustomThemes(next)
+                    setActiveTheme(editingTheme.id)
+                    saveThemeId(editingTheme.id)
+                    applyTheme(editingTheme)
+                    setEditingTheme(null)
+                  }}>Save</button>
+                  <button className="theme-cancel-btn" onClick={() => {
+                    setEditingTheme(null)
+                    const t = getAllThemes().find((t) => t.id === activeTheme) || THEME_PRESETS[0]!
+                    applyTheme(t)
+                  }}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            <h3 className="settings-section" style={{ marginTop: 24 }}>Text</h3>
+            <div className="text-settings">
+              <div className="text-setting-row">
+                <label>Font</label>
+                <select
+                  value={textSettings.fontFamily}
+                  onChange={(e) => {
+                    const next = { ...textSettings, fontFamily: e.target.value }
+                    setTextSettingsState(next)
+                    saveTextSettings(next)
+                    applyTextSettings(next)
+                  }}
+                  className="text-setting-select"
+                >
+                  {FONT_OPTIONS.map((f) => (
+                    <option key={f.value} value={f.value}>{f.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="text-setting-row">
+                <label>Font Size ({textSettings.fontSize}px)</label>
+                <input
+                  type="range" min={10} max={22} step={1}
+                  value={textSettings.fontSize}
+                  onChange={(e) => {
+                    const next = { ...textSettings, fontSize: Number(e.target.value) }
+                    setTextSettingsState(next)
+                    saveTextSettings(next)
+                    applyTextSettings(next)
+                  }}
+                />
+              </div>
+              <div className="text-setting-row">
+                <label>Line Height ({textSettings.lineHeight.toFixed(1)})</label>
+                <input
+                  type="range" min={1} max={2.5} step={0.1}
+                  value={textSettings.lineHeight}
+                  onChange={(e) => {
+                    const next = { ...textSettings, lineHeight: Number(e.target.value) }
+                    setTextSettingsState(next)
+                    saveTextSettings(next)
+                    applyTextSettings(next)
+                  }}
+                />
+              </div>
+              <div className="text-setting-row">
+                <label>Letter Spacing ({textSettings.letterSpacing}px)</label>
+                <input
+                  type="range" min={-1} max={5} step={0.5}
+                  value={textSettings.letterSpacing}
+                  onChange={(e) => {
+                    const next = { ...textSettings, letterSpacing: Number(e.target.value) }
+                    setTextSettingsState(next)
+                    saveTextSettings(next)
+                    applyTextSettings(next)
+                  }}
+                />
+              </div>
+              <button className="text-setting-reset" onClick={() => {
+                setTextSettingsState({ ...DEFAULT_TEXT_SETTINGS })
+                saveTextSettings({ ...DEFAULT_TEXT_SETTINGS })
+                applyTextSettings({ ...DEFAULT_TEXT_SETTINGS })
+              }}>Reset to Default</button>
+            </div>
+
+            <h3 className="settings-section" style={{ marginTop: 24 }}>Preview</h3>
+            <div className="theme-live-preview" style={{
+              fontFamily: textSettings.fontFamily + ", 'Noto Color Emoji'",
+              fontSize: textSettings.fontSize,
+              lineHeight: textSettings.lineHeight,
+              letterSpacing: textSettings.letterSpacing,
+            }}>
+              <div className="preview-sidebar" style={{ background: 'var(--bg-secondary)' }}>
+                <div className="preview-server-icon" style={{ background: 'var(--accent)' }}>R</div>
+                <div className="preview-channel" style={{ color: 'var(--text-muted)' }}># general</div>
+                <div className="preview-channel active" style={{ color: 'var(--text-primary)', background: 'var(--bg-tertiary)' }}># random</div>
+                <div className="preview-channel" style={{ color: 'var(--text-muted)' }}># off-topic</div>
+              </div>
+              <div className="preview-chat" style={{ background: 'var(--bg-primary)' }}>
+                <div className="preview-header" style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-primary)' }}># random</div>
+                <div className="preview-messages">
+                  <div className="preview-msg">
+                    <span className="preview-msg-author" style={{ color: 'var(--accent)' }}>Alice</span>
+                    <span className="preview-msg-text" style={{ color: 'var(--text-primary)' }}>Hey everyone! 👋</span>
+                    <span className="preview-msg-time" style={{ color: 'var(--text-muted)' }}>2:30 PM</span>
+                  </div>
+                  <div className="preview-msg">
+                    <span className="preview-msg-author" style={{ color: 'var(--success)' }}>Bob</span>
+                    <span className="preview-msg-text" style={{ color: 'var(--text-primary)' }}>What's up? Working on anything cool?</span>
+                    <span className="preview-msg-time" style={{ color: 'var(--text-muted)' }}>2:31 PM</span>
+                  </div>
+                  <div className="preview-msg">
+                    <span className="preview-msg-author" style={{ color: 'var(--accent-hover)' }}>Charlie</span>
+                    <span className="preview-msg-text" style={{ color: 'var(--text-secondary)' }}>Just shipped a new feature 🚀</span>
+                    <span className="preview-msg-time" style={{ color: 'var(--text-muted)' }}>2:32 PM</span>
+                  </div>
+                </div>
+                <div className="preview-input" style={{ background: 'var(--bg-input)', border: '1px solid var(--border)', color: 'var(--text-muted)' }}>
+                  Message #random
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -1563,6 +1790,9 @@ export default function SettingsPanel({ onClose }: Props) {
                   onMouseUp={handleSpectrumMouseUp}
                   onMouseLeave={handleSpectrumMouseUp}
                   onContextMenu={handleSpectrumContextMenu}
+                  onTouchStart={handleSpectrumTouchStart}
+                  onTouchEnd={() => clearTimeout(eqLongPressRef.current)}
+                  onTouchMove={() => clearTimeout(eqLongPressRef.current)}
                 />
                 {eqContextMenu && (() => {
                   const canvasRect = spectrumCanvasRef.current?.getBoundingClientRect()
@@ -1577,11 +1807,14 @@ export default function SettingsPanel({ onClose }: Props) {
                     { label: 'High Pass', value: 'highpass' },
                   ]
                   return (
-                    <div
-                      className="eq-context-menu"
-                      style={{ position: 'absolute', left: menuX, top: menuY, zIndex: 100 }}
-                      onMouseLeave={() => setEqContextMenu(null)}
-                    >
+                    <>
+                      <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setEqContextMenu(null)} />
+                      <div
+                        className="eq-context-menu"
+                        style={{ position: 'absolute', left: menuX, top: menuY, zIndex: 100 }}
+                        onMouseLeave={() => setEqContextMenu(null)}
+                        onClick={(e) => e.stopPropagation()}
+                      >
                       <div className="eq-context-label">Band {eqContextMenu.bandIdx + 1} — {Math.round(band?.freq ?? 0)} Hz</div>
                       {types.map(t => (
                         <button
@@ -1598,11 +1831,12 @@ export default function SettingsPanel({ onClose }: Props) {
                         >{t.label}</button>
                       ))}
                     </div>
+                    </>
                   )
                 })()}
               </div>
               <p className="settings-hint" style={{ marginTop: 4 }}>
-                Drag EQ handles to shape your sound. Right-click a handle to change filter type. Drag the gate line to adjust threshold.
+                Drag EQ handles to shape your sound. Right-click (or long-press) a handle to change filter type. Drag the gate line to adjust threshold.
               </p>
               <button className="settings-preview-btn" onClick={toggleMicTest}>
                 {micTestStream ? '⏹ Stop Mic Test' : '🎤 Test Microphone'}

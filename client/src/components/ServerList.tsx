@@ -21,11 +21,12 @@ interface Props {
   serverUnreads?: Record<string, { count: number; mentioned: boolean }>
   onReorder?: (serverIds: string[]) => void
   width?: number
+  mobileOpen?: boolean
 }
 
 export type { DMEntry }
 
-export default function ServerList({ servers, selected, onSelect, onDMs, onCreate, isDMView, onJoinByCode, unreadDMs, onSelectDM, serverUnreads, onReorder, width }: Props) {
+export default function ServerList({ servers, selected, onSelect, onDMs, onCreate, isDMView, onJoinByCode, unreadDMs, onSelectDM, serverUnreads, onReorder, width, mobileOpen }: Props) {
   const [showModal, setShowModal] = useState<'create' | 'join' | null>(null)
   const [serverName, setServerName] = useState('')
   const [joinCode, setJoinCode] = useState('')
@@ -49,7 +50,7 @@ export default function ServerList({ servers, selected, onSelect, onDMs, onCreat
   }
 
   return (
-    <div className="server-list" style={width ? { width } : undefined}>
+    <div className={`server-list${mobileOpen ? ' mobile-open' : ''}`} style={width ? { width } : undefined}>
       <button
         className={`server-nav-item dm-btn ${isDMView ? 'active' : ''}`}
         onClick={onDMs}

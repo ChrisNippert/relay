@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import type { Channel } from '../types'
 import * as api from '../services/api'
@@ -43,6 +43,7 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
   const [dragOverId, setDragOverId] = useState<string | null>(null)
   const [voiceCtxMenu, setVoiceCtxMenu] = useState<{ x: number; y: number; userId: string; displayName: string; channelId: string } | null>(null)
   const [voiceCtxVolume, setVoiceCtxVolume] = useState(100)
+  const longPressTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   const handleCreateStart = (type: 'text' | 'voice') => {
     setCreatingType(type)
@@ -227,7 +228,20 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
                         e.preventDefault()
                         setVoiceCtxVolume(getVoiceUserVolume?.(u.id) ?? 100)
                         setVoiceCtxMenu({ x: e.clientX, y: e.clientY, userId: u.id, displayName: u.displayName, channelId: ch.id })
-                      }}>
+                      }}
+                      onTouchStart={(e) => {
+                        if (u.id === me?.id) return
+                        const touch = e.touches[0]
+                        if (!touch) return
+                        const x = touch.clientX, y = touch.clientY
+                        longPressTimer.current = setTimeout(() => {
+                          setVoiceCtxVolume(getVoiceUserVolume?.(u.id) ?? 100)
+                          setVoiceCtxMenu({ x, y, userId: u.id, displayName: u.displayName, channelId: ch.id })
+                        }, 500)
+                      }}
+                      onTouchEnd={() => clearTimeout(longPressTimer.current)}
+                      onTouchMove={() => clearTimeout(longPressTimer.current)}
+                      >
                         <span className={`voice-channel-user-dot ${u.speaking ? 'speaking' : ''}`} />
                         <span className="voice-channel-user-name">{u.displayName}</span>
                         <span className="voice-channel-user-icons">
@@ -260,7 +274,7 @@ export default function ChannelList({ channels, selected, onSelect, voicePresenc
 
       {voiceCtxMenu && createPortal(
         <div className="voice-context-menu-overlay" onClick={() => setVoiceCtxMenu(null)} onContextMenu={(e) => { e.preventDefault(); setVoiceCtxMenu(null) }}>
-          <div className="voice-context-menu" style={{ left: voiceCtxMenu.x, top: voiceCtxMenu.y }} onClick={(e) => e.stopPropagation()}>
+          <div className="voice-context-menu" style={{ left: Math.min(voiceCtxMenu.x, window.innerWidth - 220), top: Math.min(voiceCtxMenu.y, window.innerHeight - 120) }} onClick={(e) => e.stopPropagation()}>
             <div className="voice-context-menu-header">{voiceCtxMenu.displayName}</div>
             <div className="voice-context-menu-item volume-control">
               <label>

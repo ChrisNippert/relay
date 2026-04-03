@@ -54,6 +54,57 @@ export default function Home() {
   const channelServerMapRef = useRef<Record<string, string>>({})
   const [dmToasts, setDmToasts] = useState<{ id: string; name: string; text: string; channelId: string }[]>([])
 
+  // Mobile responsive state
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768)
+  const [mobilePanel, setMobilePanel] = useState<'servers' | 'channels' | 'members' | null>(null)
+
+  useEffect(() => {
+    const onResize = () => {
+      const mobile = window.innerWidth <= 768
+      setIsMobile(mobile)
+      if (!mobile) setMobilePanel(null)
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  // Close mobile panel when selecting things
+  const closeMobilePanel = useCallback(() => setMobilePanel(null), [])
+
+  // Swipe gestures for mobile panels
+  const touchStartRef = useRef<{ x: number; y: number; time: number } | null>(null)
+  useEffect(() => {
+    if (!isMobile) return
+    const handleTouchStart = (e: TouchEvent) => {
+      const t = e.touches[0]
+      if (t) touchStartRef.current = { x: t.clientX, y: t.clientY, time: Date.now() }
+    }
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (!touchStartRef.current) return
+      const t = e.changedTouches[0]
+      if (!t) return
+      const dx = t.clientX - touchStartRef.current.x
+      const dy = t.clientY - touchStartRef.current.y
+      const dt = Date.now() - touchStartRef.current.time
+      const startX = touchStartRef.current.x
+      touchStartRef.current = null
+      // Must be mostly horizontal swipe, fast enough, and long enough
+      if (Math.abs(dx) < 60 || Math.abs(dy) > Math.abs(dx) * 0.7 || dt > 400) return
+      if (dx > 0 && startX < 40) {
+        // Swipe right from left edge → open channels
+        setMobilePanel('channels')
+      } else if (dx < 0 && startX > window.innerWidth - 40) {
+        // Swipe left from right edge → open members
+        setMobilePanel('members')
+      } else if (dx < 0) {
+        // Swipe left anywhere → close open panel
+        setMobilePanel(null)
+      }
+    }
+    document.addEventListener('touchstart', handleTouchStart, { passive: true })
+    document.addEventListener('touchend', handleTouchEnd, { passive: true })
+    return () => { document.removeEventListener('touchstart', handleTouchStart); document.removeEventListener('touchend', handleTouchEnd) }
+  }, [isMobile])
   // Populate channel→server mapping when servers load
   useEffect(() => {
     servers.forEach((s) => {
@@ -420,6 +471,7 @@ export default function Home() {
 
   const handleSelectChannel = (channel: Channel) => {
     setSelectedChannel(channel)
+    closeMobilePanel()
     // Clear unread badge for this channel
     setUnreadChannels((prev) => {
       if (!prev[channel.id]) return prev
@@ -592,8 +644,8 @@ export default function Home() {
       <ServerList
         servers={servers}
         selected={selectedServer}
-        onSelect={handleSelectServer}
-        onDMs={handleSelectDMs}
+        onSelect={(s) => { handleSelectServer(s); if (isMobile) setMobilePanel('channels') }}
+        onDMs={() => { handleSelectDMs(); if (isMobile) setMobilePanel('channels') }}
         onCreate={handleCreateServer}
         isDMView={view === 'dm'}
         onJoinByCode={handleJoinByCode}
@@ -608,6 +660,7 @@ export default function Home() {
             delete next[ch.id]
             return next
           })
+          closeMobilePanel()
         }}
         serverUnreads={serverUnreads}
         onReorder={(ids) => {
@@ -620,10 +673,11 @@ export default function Home() {
           })
         }}
         width={serverWidth}
+        mobileOpen={mobilePanel === 'servers'}
       />
       <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); serverResizing.current = true; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none' }} />
 
-      <div className={`channel-sidebar ${channelSidebarCollapsed ? 'collapsed' : ''}`} style={!channelSidebarCollapsed ? { width: channelWidth } : undefined}>
+      <div className={`channel-sidebar ${channelSidebarCollapsed && !isMobile ? 'collapsed' : ''}${mobilePanel === 'channels' ? ' mobile-open' : ''}`} style={!channelSidebarCollapsed && !isMobile ? { width: channelWidth } : undefined}>
         <div className="channel-sidebar-header">
           {!channelSidebarCollapsed && (
             <>
@@ -762,9 +816,9 @@ export default function Home() {
               autoJoin
               isAdmin={isAdmin}
               showMembers={showMembers}
-              onToggleMembers={view === 'server' ? () => setShowMembers((p) => !p) : undefined}
+              onToggleMembers={view === 'server' ? () => isMobile ? setMobilePanel(mobilePanel === 'members' ? null : 'members') : setShowMembers((p) => !p) : undefined}
               channelSidebarCollapsed={channelSidebarCollapsed}
-              onToggleChannelSidebar={() => setChannelSidebarCollapsed((p) => !p)}
+              onToggleChannelSidebar={() => isMobile ? setMobilePanel(mobilePanel === 'channels' ? null : 'channels') : setChannelSidebarCollapsed((p) => !p)}
               onJoin={() => {
                 setActiveVoiceChannel(activeVoiceChannel)
                 syncVoiceControls()
@@ -799,12 +853,14 @@ export default function Home() {
             />
           ) : selectedChannel && !isVoiceChannel ? (
             <ChatView channel={selectedChannel} onStartCall={handleStartDMCall} onDMUser={handleDMUser}
-              showMembersToggle={view === 'server'} showMembers={showMembers} onToggleMembers={() => setShowMembers((p) => !p)}
+              showMembersToggle={view === 'server'} showMembers={showMembers}
+              onToggleMembers={() => isMobile ? setMobilePanel(mobilePanel === 'members' ? null : 'members') : setShowMembers((p) => !p)}
               isAdmin={isAdmin} serverId={selectedServer?.id}
-              channelSidebarCollapsed={channelSidebarCollapsed} onToggleChannelSidebar={() => setChannelSidebarCollapsed((p) => !p)} />
+              channelSidebarCollapsed={channelSidebarCollapsed}
+              onToggleChannelSidebar={() => isMobile ? setMobilePanel(mobilePanel === 'channels' ? null : 'channels') : setChannelSidebarCollapsed((p) => !p)} />
           ) : !selectedChannel ? (
             <div className="no-channel">
-              <p>Select a channel to start chatting</p>
+              <p>{isMobile ? 'Tap Channels below to pick a chat' : 'Select a channel to start chatting'}</p>
             </div>
           ) : null
         )}
@@ -812,7 +868,7 @@ export default function Home() {
 
       {/* Members sidebar for servers */}
       {view === 'server' && selectedServer && (
-        <div className={`members-sidebar-wrapper ${showMembers ? 'open' : ''}`}>
+        <div className={`members-sidebar-wrapper ${isMobile ? (mobilePanel === 'members' ? 'open' : '') : (showMembers ? 'open' : '')}`}>
           <MembersSidebar serverId={selectedServer.id} onMessage={handleDMUser} isAdmin={isAdmin} />
         </div>
       )}
@@ -842,6 +898,38 @@ export default function Home() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Mobile backdrop */}
+      {isMobile && mobilePanel && (
+        <div className="mobile-backdrop" onClick={closeMobilePanel} />
+      )}
+
+      {/* Mobile bottom nav */}
+      {isMobile && (
+        <nav className="mobile-nav">
+          <button className={`mobile-nav-btn${mobilePanel === 'servers' ? ' active' : ''}`} onClick={() => setMobilePanel(mobilePanel === 'servers' ? null : 'servers')}>
+            <span>🏠</span>
+            <span className="mobile-nav-btn-label">Servers</span>
+            {Object.values(serverUnreads).some(u => u.count > 0) && <span className="mobile-nav-badge">{Object.values(serverUnreads).reduce((s, u) => s + u.count, 0)}</span>}
+          </button>
+          <button className={`mobile-nav-btn${mobilePanel === 'channels' ? ' active' : ''}`} onClick={() => setMobilePanel(mobilePanel === 'channels' ? null : 'channels')}>
+            <span>💬</span>
+            <span className="mobile-nav-btn-label">Channels</span>
+          </button>
+          <button className={`mobile-nav-btn${!mobilePanel && !showSettings ? ' active' : ''}`} onClick={closeMobilePanel}>
+            <span>📝</span>
+            <span className="mobile-nav-btn-label">Chat</span>
+          </button>
+          <button className={`mobile-nav-btn${mobilePanel === 'members' ? ' active' : ''}`} onClick={() => { setMobilePanel(mobilePanel === 'members' ? null : 'members'); if (mobilePanel !== 'members') setShowMembers(true) }}>
+            <span>👥</span>
+            <span className="mobile-nav-btn-label">Members</span>
+          </button>
+          <button className="mobile-nav-btn" onClick={() => { closeMobilePanel(); setShowSettings(true) }}>
+            <span>⚙️</span>
+            <span className="mobile-nav-btn-label">Settings</span>
+          </button>
+        </nav>
       )}
     </div>
   )

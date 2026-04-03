@@ -83,6 +83,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
   const remoteGainRef = useRef<Map<string, { ctx: AudioContext; gain: GainNode }>>(new Map())
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; userId: string; displayName: string; isSelf: boolean; tileId?: string } | null>(null)
   const [userVolumes, setUserVolumes] = useState<Record<string, number>>(() => getSettings().userVolumes || {})
+  const tileLongPressRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   // Load server members for display names, or DM participants
   useEffect(() => {
@@ -961,15 +962,40 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     } else {
       try {
         const settings = getSettings()
+        const camSettings = settings.cameraSettings || {}
+        const videoConstraints: MediaTrackConstraints = settings.videoDevice
+          ? { deviceId: { exact: settings.videoDevice } }
+          : {}
+        // Apply stored resolution
+        if (camSettings.resolution && camSettings.resolution !== 'default') {
+          const [rw, rh] = camSettings.resolution.split('x').map(Number)
+          if (rw && rh) { videoConstraints.width = { ideal: rw }; videoConstraints.height = { ideal: rh } }
+        }
         const constraints: MediaStreamConstraints = {
           audio: false,
-          video: settings.videoDevice ? { deviceId: { exact: settings.videoDevice } } : true
+          video: Object.keys(videoConstraints).length > 0 ? videoConstraints : true
         }
         const videoStream = await navigator.mediaDevices.getUserMedia(constraints)
         // Stop any audio tracks that may have been captured
         videoStream.getAudioTracks().forEach((t) => t.stop())
         const videoTrack = videoStream.getVideoTracks()[0]
         if (videoTrack && localStreamRef.current) {
+          // Apply stored camera hardware settings
+          const advanced: Record<string, unknown> = {}
+          if (camSettings.whiteBalanceMode) advanced.whiteBalanceMode = camSettings.whiteBalanceMode
+          if (camSettings.exposureMode) advanced.exposureMode = camSettings.exposureMode
+          if (camSettings.focusMode) advanced.focusMode = camSettings.focusMode
+          if (camSettings.exposureCompensation != null) advanced.exposureCompensation = camSettings.exposureCompensation
+          if (camSettings.exposureTime != null) advanced.exposureTime = camSettings.exposureTime
+          if (camSettings.iso != null) advanced.iso = camSettings.iso
+          if (camSettings.brightness != null) advanced.brightness = camSettings.brightness
+          if (camSettings.contrast != null) advanced.contrast = camSettings.contrast
+          if (camSettings.saturation != null) advanced.saturation = camSettings.saturation
+          if (camSettings.colorTemperature != null) advanced.colorTemperature = camSettings.colorTemperature
+          if (camSettings.sharpness != null) advanced.sharpness = camSettings.sharpness
+          if (Object.keys(advanced).length > 0) {
+            try { await videoTrack.applyConstraints({ advanced: [advanced] } as MediaTrackConstraints) } catch { /* unsupported */ }
+          }
           localStreamRef.current.addTrack(videoTrack)
           if (localVideoRef.current) {
             localVideoRef.current.srcObject = localStreamRef.current
@@ -1178,6 +1204,18 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     setContextMenu({ x: e.clientX, y: e.clientY, userId: tile.userId, displayName: tile.displayName, isSelf: false, tileId: tile.tileId })
   }
 
+  const handleTileTouchStart = (e: React.TouchEvent, tile: typeof displayTiles[0]) => {
+    if (tile.isSelf) return
+    const touch = e.touches[0]
+    if (!touch) return
+    const x = touch.clientX, y = touch.clientY
+    tileLongPressRef.current = setTimeout(() => {
+      setContextMenu({ x, y, userId: tile.userId, displayName: tile.displayName, isSelf: false, tileId: tile.tileId })
+    }, 500)
+  }
+
+  const handleTileTouchEnd = () => clearTimeout(tileLongPressRef.current)
+
   const handleVoiceKick = () => {
     if (!contextMenu) return
     sendVoiceKick(channel.id, contextMenu.userId)
@@ -1248,6 +1286,9 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
           className={`voice-tile has-media ${isFocused ? 'focused' : ''} ${isUnfocused ? 'unfocused' : ''}`}
           onClick={() => setWatchingTiles((prev) => new Set(prev).add(tile.tileId))}
           onContextMenu={(e) => handleTileContextMenu(e, tile)}
+          onTouchStart={(e) => handleTileTouchStart(e, tile)}
+          onTouchEnd={handleTileTouchEnd}
+          onTouchMove={handleTileTouchEnd}
         >
           <div className="voice-tile-media voice-tile-unwatched">
             <span className="voice-tile-avatar">{tile.displayName.charAt(0).toUpperCase()}</span>
@@ -1268,6 +1309,9 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
           className={`voice-tile has-media ${isFocused ? 'focused' : ''} ${isUnfocused ? 'unfocused' : ''}`}
           onClick={() => handleTileClick(tile.tileId)}
           onContextMenu={(e) => handleTileContextMenu(e, tile)}
+          onTouchStart={(e) => handleTileTouchStart(e, tile)}
+          onTouchEnd={handleTileTouchEnd}
+          onTouchMove={handleTileTouchEnd}
         >
           <div className="voice-tile-media">
             <div className="voice-tile-video-pane screen-pane">
@@ -1304,6 +1348,9 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         className={`voice-tile ${tile.speaking ? 'speaking' : ''} ${tile.isSelf ? 'is-self' : ''} ${muted && tile.isSelf ? 'is-muted' : ''} ${isFocused ? 'focused' : ''} ${isUnfocused ? 'unfocused' : ''} ${(tile.hasVideo || tile.hasScreen) ? 'has-media' : ''}`}
         onClick={() => handleTileClick(tile.tileId)}
         onContextMenu={(e) => handleTileContextMenu(e, tile)}
+        onTouchStart={(e) => handleTileTouchStart(e, tile)}
+        onTouchEnd={handleTileTouchEnd}
+        onTouchMove={handleTileTouchEnd}
       >
         {tile.hasVideo ? (
           <div className="voice-tile-media">
@@ -1445,7 +1492,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       {/* Voice context menu */}
       {contextMenu && (
         <div className="voice-context-menu-overlay" onClick={() => setContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setContextMenu(null) }}>
-          <div className="voice-context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onClick={(e) => e.stopPropagation()}>
+          <div className="voice-context-menu" style={{ left: Math.min(contextMenu.x, window.innerWidth - 220), top: Math.min(contextMenu.y, window.innerHeight - 120) }} onClick={(e) => e.stopPropagation()}>
             <div className="voice-context-menu-header">{contextMenu.displayName}</div>
             <div className="voice-context-menu-item volume-control">
               <label>

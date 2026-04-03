@@ -46,9 +46,9 @@ export default function UserPopover({ userId, anchorRect, onClose, onMessage, se
     return () => { cancelled = true }
   }, [userId])
 
-  // Close on click outside
+  // Close on click/touch outside
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
+    const handler = (e: MouseEvent | TouchEvent) => {
       if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
         // Check if the click target is a member item (toggle handled by parent)
         const target = e.target as HTMLElement
@@ -57,22 +57,31 @@ export default function UserPopover({ userId, anchorRect, onClose, onMessage, se
       }
     }
     // Use setTimeout to avoid catching the same click that opened the popover
-    const id = setTimeout(() => document.addEventListener('mousedown', handler), 0)
-    return () => { clearTimeout(id); document.removeEventListener('mousedown', handler) }
+    const id = setTimeout(() => {
+      document.addEventListener('mousedown', handler)
+      document.addEventListener('touchstart', handler)
+    }, 0)
+    return () => { clearTimeout(id); document.removeEventListener('mousedown', handler); document.removeEventListener('touchstart', handler) }
   }, [onClose])
 
-  // Position the popover
+  // Position the popover — center on mobile
   const style: React.CSSProperties = {}
   const popW = 280
   const popH = 200
-  // Prefer right side of anchor, fall back to left
-  if (anchorRect.right + popW + 8 < window.innerWidth) {
-    style.left = anchorRect.right + 8
+  const isMobileView = window.innerWidth <= 768
+  if (isMobileView) {
+    style.left = Math.max(8, (window.innerWidth - popW) / 2)
+    style.top = Math.max(8, Math.min(anchorRect.bottom + 8, window.innerHeight - popH - 8))
   } else {
-    style.left = Math.max(8, anchorRect.left - popW - 8)
+    // Prefer right side of anchor, fall back to left
+    if (anchorRect.right + popW + 8 < window.innerWidth) {
+      style.left = anchorRect.right + 8
+    } else {
+      style.left = Math.max(8, anchorRect.left - popW - 8)
+    }
+    // Vertically center on anchor, clamped
+    style.top = Math.max(8, Math.min(anchorRect.top - popH / 4, window.innerHeight - popH - 8))
   }
-  // Vertically center on anchor, clamped
-  style.top = Math.max(8, Math.min(anchorRect.top - popH / 4, window.innerHeight - popH - 8))
 
   const handleAddFriend = async () => {
     try {
