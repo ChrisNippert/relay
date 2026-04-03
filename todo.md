@@ -1,14 +1,14 @@
 # NOTE - NEVER EDIT THIS FILE IT ONLY GETS EDITED BY HAND
 # BUGS
 * Align the server name with the channel name in the main pane
-* Seems theres a horizontal scrollbar in the chat because the audio file playback thing is too big too. Can we make that shrink to fit too?
+
+
 
 # QOL Stuff
-* selecting points on the EQ should bring up a menu for low pass, high pass, and other types of eq notes like in reaper.
-* Make there grid lines and log scaling, and let me go down to -inf and max of like 24
+<!-- Maybe a file import or some AI noise supression that is togglable? -->
+* Add Camera settings support, for things like auto-color correction, iso, shutter speed, brightness, resolution, and the like
 
 # UI QOL
-* Make the emoji button and file buttons thinner and cleaner, more like discord
 
 # Big Todos
 * Make A mobile web version
@@ -83,3 +83,7 @@
     * The button at the bottom is not intuitive. Also the chevrons for the friends bit is next to the panel instead of on the panel. Make it like this for the other ones as well, so the channels chevrons are to the left of the name of the chat in the main page, and the servers maybe just be able to grab and slide it istead of a minimize button.
 * X on the channel settings looks ugly
 * Spectrum Analyzer should always show, and maybe make it a little smoother looking. It's hard to grab the things and tweak them
+
+* Message box seems to draw over members and such when window is thin
+* Emoji window should pop up on the right side
+* When window size is large, settings page does not take up as much more space than when it is small.

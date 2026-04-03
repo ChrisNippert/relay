@@ -1472,75 +1472,77 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
         )}
         <form className="message-input" onSubmit={handleSend}>
           <input type="file" ref={fileInputRef} onChange={handleFileSelect} multiple style={{ display: 'none' }} />
-          <button type="button" className="upload-btn" onClick={() => fileInputRef.current?.click()} title="Upload file">
-            📎
-          </button>
-          <button type="button" className="emoji-btn" onClick={() => setShowEmojiPicker((p) => !p)} title="Emoji">
-            😀
-          </button>
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => handleInput(e.target.value)}
-            onPaste={handlePaste}
-            placeholder={encrypted && !encryptionReady ? '🔓 New here — your first message will rotate the encryption key' : `Message ${channel.server_id ? '#' + channel.name : (dmPartnerName || channel.name || 'this channel')}`}
-            autoFocus
-            rows={1}
-            className="message-textarea"
-            onKeyDown={e => {
-              // Autocomplete navigation (mentions & emotes)
-              const acOpen = mentionUsers.length > 0 || emoteResults.length > 0
-              const acLen = mentionUsers.length || emoteResults.length
-              if (acOpen) {
-                if (e.key === 'ArrowDown') {
-                  e.preventDefault()
-                  setAcIndex((i) => (i + 1) % acLen)
-                  return
-                }
-                if (e.key === 'ArrowUp') {
-                  e.preventDefault()
-                  setAcIndex((i) => (i - 1 + acLen) % acLen)
-                  return
-                }
-                if (e.key === 'Tab' || e.key === 'Enter') {
-                  e.preventDefault()
-                  if (mentionUsers.length > 0) {
-                    insertMention(mentionUsers[acIndex]!)
-                  } else if (emoteResults.length > 0) {
-                    insertEmote(emoteResults[acIndex]![1])
+          <div className="message-input-wrapper">
+            <button type="button" className="upload-btn" onClick={() => fileInputRef.current?.click()} title="Upload file">
+              📎
+            </button>
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => handleInput(e.target.value)}
+              onPaste={handlePaste}
+              placeholder={encrypted && !encryptionReady ? '🔓 New here — your first message will rotate the encryption key' : `Message ${channel.server_id ? '#' + channel.name : (dmPartnerName || channel.name || 'this channel')}`}
+              autoFocus
+              rows={1}
+              className="message-textarea"
+              onKeyDown={e => {
+                // Autocomplete navigation (mentions & emotes)
+                const acOpen = mentionUsers.length > 0 || emoteResults.length > 0
+                const acLen = mentionUsers.length || emoteResults.length
+                if (acOpen) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault()
+                    setAcIndex((i) => (i + 1) % acLen)
+                    return
                   }
-                  return
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    setAcIndex((i) => (i - 1 + acLen) % acLen)
+                    return
+                  }
+                  if (e.key === 'Tab' || e.key === 'Enter') {
+                    e.preventDefault()
+                    if (mentionUsers.length > 0) {
+                      insertMention(mentionUsers[acIndex]!)
+                    } else if (emoteResults.length > 0) {
+                      insertEmote(emoteResults[acIndex]![1])
+                    }
+                    return
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault()
+                    setMentionUsers([])
+                    setEmoteResults([])
+                    return
+                  }
                 }
                 if (e.key === 'Escape') {
-                  e.preventDefault()
-                  setMentionUsers([])
-                  setEmoteResults([])
-                  return
+                  if (replyingTo) {
+                    e.preventDefault()
+                    setReplyingTo(null)
+                  }
                 }
-              }
-              if (e.key === 'Escape') {
-                if (replyingTo) {
-                  e.preventDefault()
-                  setReplyingTo(null)
+                if (e.key === 'ArrowUp' && !input && !editingMsg) {
+                  const myLastMsg = [...messages].reverse().find(m => m.user_id === user?.id && !m.deleted)
+                  if (myLastMsg) {
+                    e.preventDefault()
+                    handleEdit(myLastMsg)
+                  }
                 }
-              }
-              if (e.key === 'ArrowUp' && !input && !editingMsg) {
-                const myLastMsg = [...messages].reverse().find(m => m.user_id === user?.id && !m.deleted)
-                if (myLastMsg) {
-                  e.preventDefault()
-                  handleEdit(myLastMsg)
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  // If there's an unclosed code block (odd number of ```), Enter = newline
+                  const backtickCount = (input.match(/```/g) || []).length
+                  if (backtickCount % 2 !== 0) return
+                  e.preventDefault();
+                  handleSend(e as unknown as FormEvent);
                 }
-              }
-              if (e.key === 'Enter' && !e.shiftKey) {
-                // If there's an unclosed code block (odd number of ```), Enter = newline
-                const backtickCount = (input.match(/```/g) || []).length
-                if (backtickCount % 2 !== 0) return
-                e.preventDefault();
-                handleSend(e as unknown as FormEvent);
-              }
-            }}
-          />
-          <button type="submit" disabled={uploading || pendingFiles.some(f => !f.id && !f.error)}>{pendingFiles.some(f => !f.id && !f.error) ? 'Uploading…' : 'Send'}</button>
+              }}
+            />
+            <button type="button" className="emoji-btn" onClick={() => setShowEmojiPicker((p) => !p)} title="Emoji">
+              😀
+            </button>
+          </div>
+          <button type="submit" className="message-send-btn" disabled={uploading || pendingFiles.some(f => !f.id && !f.error)}>{pendingFiles.some(f => !f.id && !f.error) ? 'Uploading…' : 'Send'}</button>
         </form>
       </div>
 

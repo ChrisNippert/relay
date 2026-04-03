@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { getSettings, saveSettings, getDevices, type MediaSettings, THEME_PRESETS, getThemeId, saveThemeId, applyTheme } from '../services/settings'
+import { getSettings, saveSettings, getDevices, defaults as settingsDefaults, type MediaSettings, THEME_PRESETS, getThemeId, saveThemeId, applyTheme } from '../services/settings'
 import { useAuth } from '../context/AuthContext'
 import * as api from '../services/api'
 import type { Device } from '../types'
@@ -39,6 +39,7 @@ export default function SettingsPanel({ onClose }: Props) {
   const [expandedNode, setExpandedNode] = useState<string | null>(null)
   const [draggedNode, setDraggedNode] = useState<string | null>(null)
   const [eqContextMenu, setEqContextMenu] = useState<{ x: number; y: number; bandIdx: number } | null>(null)
+  const [cameraCapabilities, setCameraCapabilities] = useState<Record<string, unknown> | null>(null)
   const micTestCtxRef = useRef<AudioContext | null>(null)
   const micTestAnimRef = useRef<number>(0)
   const micMonitorRef = useRef<{ stream: MediaStream; ctx: AudioContext; anim: number } | null>(null)
@@ -170,135 +171,247 @@ export default function SettingsPanel({ onClose }: Props) {
     if (!canvas || !dataArray) return
     const c = canvas.getContext('2d')
     if (!c) return
-    const w = canvas.width, h = canvas.height
+
+    // Sync canvas backing store to CSS display size × devicePixelRatio for crisp text
+    const dpr = window.devicePixelRatio || 1
+    const rect = canvas.getBoundingClientRect()
+    const displayW = Math.round(rect.width * dpr)
+    const displayH = Math.round(rect.height * dpr)
+    if (canvas.width !== displayW || canvas.height !== displayH) {
+      canvas.width = displayW
+      canvas.height = displayH
+    }
+    c.setTransform(dpr, 0, 0, dpr, 0, 0) // scale all drawing by dpr
+
+    // Use CSS pixel dimensions for all drawing math
+    const w = rect.width, h = rect.height
     const liveS = getSettings()
     const sr = spectrumSampleRateRef.current
     const nyquist = sr / 2
     const minF = 20, maxF = Math.min(nyquist, 20000)
     const logMin = Math.log10(minF), logMax = Math.log10(maxF), logRange = logMax - logMin
 
+    // Layout: leave 30px left margin for dB labels, 14px bottom margin for freq labels
+    const mL = 30, mB = 14, mT = 4
+    const plotW = w - mL, plotH = h - mB - mT
+
+    // dB range: +24 at top, -60 at bottom (-inf). Linear from +24 to -24 in 90% of height, -24 to -60 compressed in bottom 10%
+    const maxDb = 24, minDb = -60, linearDb = -24
+    const linearPct = 0.9 // top 90% is +24..-24 linear
+    const dbToY = (db: number): number => {
+      let py: number
+      if (db >= linearDb) {
+        py = (1 - (db - linearDb) / (maxDb - linearDb)) * linearPct * plotH
+      } else {
+        py = (linearPct + (1 - linearPct) * (1 - (db - minDb) / (linearDb - minDb))) * plotH
+      }
+      return mT + py
+    }
+
     c.clearRect(0, 0, w, h)
-    c.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg-tertiary').trim() || '#1a1a2e'
+    c.fillStyle = '#141419'
     c.fillRect(0, 0, w, h)
 
-    // Draw frequency bars (log scale, 2px wide for smoother look)
-    for (let px = 0; px < w; px += 2) {
-      const f0 = Math.pow(10, logMin + (px / w) * logRange)
-      const f1 = Math.pow(10, logMin + ((px + 2) / w) * logRange)
+    // Band colors for per-band fills (ReaEQ style)
+    const bandColors = [
+      '#ff6b6b', '#ffa94d', '#ffd43b', '#69db7c', '#38d9a9',
+      '#4dabf7', '#748ffc', '#9775fa', '#da77f2', '#f783ac',
+    ]
+
+    // Per-band gain calculation
+    const bandGainAt = (band: { freq: number; gain: number; type?: string }, freq: number): number => {
+      const t = band.type || 'peaking'
+      if (t === 'peaking') {
+        const octaveDist = Math.log2(freq / band.freq)
+        return band.gain * Math.exp(-0.5 * Math.pow(octaveDist / 0.75, 2))
+      } else if (t === 'lowshelf') {
+        return band.gain / (1 + Math.pow(freq / band.freq, 2))
+      } else if (t === 'highshelf') {
+        return band.gain / (1 + Math.pow(band.freq / freq, 2))
+      } else if (t === 'lowpass') {
+        const ratio = freq / band.freq
+        return ratio > 1 ? -(12 * Math.log2(ratio) * Math.abs(band.gain) / 12) : 0
+      } else if (t === 'highpass') {
+        const ratio = band.freq / freq
+        return ratio > 1 ? -(12 * Math.log2(ratio) * Math.abs(band.gain) / 12) : 0
+      }
+      return 0
+    }
+
+    const zeroY = dbToY(0)
+
+    // Draw dB grid lines
+    c.font = '10px Inter, system-ui, sans-serif'
+    c.textBaseline = 'middle'
+    c.textAlign = 'right'
+    const dbLines = [24, 18, 12, 6, 0, -6, -12, -18, -24]
+    for (const db of dbLines) {
+      const gy = dbToY(db)
+      c.strokeStyle = db === 0 ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.05)'
+      c.lineWidth = db === 0 ? 1 : 0.5
+      c.beginPath()
+      c.moveTo(mL, gy)
+      c.lineTo(w, gy)
+      c.stroke()
+      c.fillStyle = db === 0 ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.25)'
+      const label = db === 0 ? '0' : `${db > 0 ? '+' : ''}${db}`
+      c.fillText(label, mL - 4, gy)
+    }
+    c.fillStyle = 'rgba(255,255,255,0.15)'
+    c.fillText('-∞', mL - 4, mT + plotH - 2)
+
+    // Frequency grid lines
+    c.textAlign = 'center'
+    c.textBaseline = 'top'
+    const freqLines = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]
+    for (const f of freqLines) {
+      if (f > maxF) continue
+      const fx = mL + ((Math.log10(f) - logMin) / logRange) * plotW
+      c.strokeStyle = 'rgba(255,255,255,0.05)'
+      c.lineWidth = 0.5
+      c.beginPath()
+      c.moveTo(fx, mT)
+      c.lineTo(fx, mT + plotH)
+      c.stroke()
+      const label = f >= 1000 ? `${f / 1000}k` : `${f}`
+      c.fillStyle = 'rgba(255,255,255,0.25)'
+      c.fillText(label, fx, mT + plotH + 2)
+    }
+
+    // Spectrum analyzer - smooth filled area with gradient
+    c.beginPath()
+    c.moveTo(mL, mT + plotH)
+    for (let px = 0; px < plotW; px++) {
+      const f0 = Math.pow(10, logMin + (px / plotW) * logRange)
+      const f1 = Math.pow(10, logMin + ((px + 1) / plotW) * logRange)
       const bin0 = Math.floor((f0 / nyquist) * dataArray.length)
       const bin1 = Math.ceil((f1 / nyquist) * dataArray.length)
       let maxAmp = 0
       for (let b = Math.max(0, bin0); b <= Math.min(dataArray.length - 1, bin1); b++) {
         if (dataArray[b]! > maxAmp) maxAmp = dataArray[b]!
       }
-      const amplitude = maxAmp / 255
-      const barHeight = amplitude * h
-      c.fillStyle = `hsla(${120 - amplitude * 120}, 80%, 50%, 0.8)`
-      c.fillRect(px, h - barHeight, 2, barHeight)
+      c.lineTo(mL + px, mT + plotH - (maxAmp / 255) * plotH)
     }
+    c.lineTo(mL + plotW, mT + plotH)
+    c.closePath()
+    const specGrad = c.createLinearGradient(0, mT, 0, mT + plotH)
+    specGrad.addColorStop(0, 'rgba(78, 205, 196, 0.18)')
+    specGrad.addColorStop(1, 'rgba(78, 205, 196, 0.02)')
+    c.fillStyle = specGrad
+    c.fill()
 
-    // Draw EQ curve overlay
+    // Per-band colored fill regions + composite curve + handles
     const bands = liveS.eqBands || []
     if (bands.length > 0) {
-      c.beginPath()
-      c.strokeStyle = 'rgba(78, 205, 196, 0.7)'
-      c.lineWidth = 2
-      for (let px = 0; px < w; px++) {
-        const freq = Math.pow(10, logMin + (px / w) * logRange)
-        let gainDb = 0
-        for (const band of bands) {
-          const t = band.type || 'peaking'
-          if (t === 'peaking') {
-            const octaveDist = Math.log2(freq / band.freq)
-            gainDb += band.gain * Math.exp(-0.5 * Math.pow(octaveDist / 0.75, 2))
-          } else if (t === 'lowshelf') {
-            gainDb += band.gain / (1 + Math.pow(freq / band.freq, 2))
-          } else if (t === 'highshelf') {
-            gainDb += band.gain / (1 + Math.pow(band.freq / freq, 2))
-          } else if (t === 'lowpass') {
-            const ratio = freq / band.freq
-            if (ratio > 1) gainDb -= 12 * Math.log2(ratio) * Math.abs(band.gain) / 12
-          } else if (t === 'highpass') {
-            const ratio = band.freq / freq
-            if (ratio > 1) gainDb -= 12 * Math.log2(ratio) * Math.abs(band.gain) / 12
-          }
-        }
-        const y = h / 2 - (Math.max(-12, Math.min(12, gainDb)) / 12) * (h / 2)
-        if (px === 0) c.moveTo(px, y)
-        else c.lineTo(px, y)
-      }
-      c.stroke()
-
-      // Draw band handles with type-specific shapes
-      c.font = '9px Inter, sans-serif'
-      c.textAlign = 'center'
-      const typeColors: Record<string, string> = {
-        peaking: '#4ecdc4', lowpass: '#e94560', highpass: '#ff6b6b',
-        lowshelf: '#ffd93d', highshelf: '#6bcb77',
-      }
+      // Individual band fills (colored regions between curve and 0dB)
       for (let i = 0; i < bands.length; i++) {
         const band = bands[i]!
-        const bx = ((Math.log10(Math.max(band.freq, minF)) - logMin) / logRange) * w
-        const by = h / 2 - (band.gain / 12) * (h / 2)
-        const color = typeColors[band.type] || '#4ecdc4'
-        const dimColor = band.gain !== 0 ? color : `${color}80`
-        c.fillStyle = dimColor
-        c.strokeStyle = '#fff'
+        if (Math.abs(band.gain) < 0.5) continue
+        const color = bandColors[i % bandColors.length]!
+
+        // Fill region
+        c.beginPath()
+        c.moveTo(mL, zeroY)
+        for (let px = 0; px <= plotW; px += 2) {
+          const freq = Math.pow(10, logMin + (px / plotW) * logRange)
+          c.lineTo(mL + px, dbToY(Math.max(minDb, Math.min(maxDb, bandGainAt(band, freq)))))
+        }
+        c.lineTo(mL + plotW, zeroY)
+        c.closePath()
+        c.fillStyle = color + '15'
+        c.fill()
+
+        // Subtle individual curve line
+        c.beginPath()
+        for (let px = 0; px <= plotW; px += 2) {
+          const freq = Math.pow(10, logMin + (px / plotW) * logRange)
+          const y = dbToY(Math.max(minDb, Math.min(maxDb, bandGainAt(band, freq))))
+          if (px === 0) c.moveTo(mL, y)
+          else c.lineTo(mL + px, y)
+        }
+        c.strokeStyle = color + '35'
+        c.lineWidth = 1
+        c.stroke()
+      }
+
+      // Composite curve fill (subtle white gradient between curve and 0dB)
+      c.beginPath()
+      c.moveTo(mL, zeroY)
+      for (let px = 0; px <= plotW; px++) {
+        const freq = Math.pow(10, logMin + (px / plotW) * logRange)
+        let g = 0
+        for (const band of bands) g += bandGainAt(band, freq)
+        c.lineTo(mL + px, dbToY(Math.max(minDb, Math.min(maxDb, g))))
+      }
+      c.lineTo(mL + plotW, zeroY)
+      c.closePath()
+      const compGrad = c.createLinearGradient(0, mT, 0, mT + plotH)
+      compGrad.addColorStop(0, 'rgba(255,255,255,0.06)')
+      compGrad.addColorStop(0.5, 'rgba(255,255,255,0.02)')
+      compGrad.addColorStop(1, 'rgba(255,255,255,0.0)')
+      c.fillStyle = compGrad
+      c.fill()
+
+      // Composite EQ curve (thick white line with glow)
+      c.save()
+      c.beginPath()
+      for (let px = 0; px <= plotW; px++) {
+        const freq = Math.pow(10, logMin + (px / plotW) * logRange)
+        let g = 0
+        for (const band of bands) g += bandGainAt(band, freq)
+        const y = dbToY(Math.max(minDb, Math.min(maxDb, g)))
+        if (px === 0) c.moveTo(mL, y)
+        else c.lineTo(mL + px, y)
+      }
+      c.strokeStyle = 'rgba(255,255,255,0.9)'
+      c.lineWidth = 2
+      c.shadowColor = 'rgba(255,255,255,0.3)'
+      c.shadowBlur = 6
+      c.stroke()
+      c.restore()
+
+      // Band handles - numbered circles (ReaEQ style)
+      for (let i = 0; i < bands.length; i++) {
+        const band = bands[i]!
+        const bx = mL + ((Math.log10(Math.max(band.freq, minF)) - logMin) / logRange) * plotW
+        const by = dbToY(band.gain)
+        const color = bandColors[i % bandColors.length]!
+        const active = Math.abs(band.gain) >= 0.5
+
+        c.save()
+        if (active) { c.shadowColor = color; c.shadowBlur = 8 }
+        c.beginPath()
+        c.arc(bx, by, 8, 0, Math.PI * 2)
+        c.fillStyle = active ? color : '#333'
+        c.fill()
+        c.strokeStyle = active ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.2)'
         c.lineWidth = 1.5
+        c.stroke()
+        c.restore()
 
-        const t = band.type || 'peaking'
-        if (t === 'lowpass' || t === 'highpass') {
-          // Triangle
-          const dir = t === 'lowpass' ? 1 : -1
-          c.beginPath()
-          c.moveTo(bx + dir * 8, by)
-          c.lineTo(bx - dir * 5, by - 7)
-          c.lineTo(bx - dir * 5, by + 7)
-          c.closePath()
-          c.fill(); c.stroke()
-        } else if (t === 'lowshelf' || t === 'highshelf') {
-          // Diamond
-          c.beginPath()
-          c.moveTo(bx, by - 8)
-          c.lineTo(bx + 7, by)
-          c.lineTo(bx, by + 8)
-          c.lineTo(bx - 7, by)
-          c.closePath()
-          c.fill(); c.stroke()
-        } else {
-          // Circle (peaking)
-          c.beginPath()
-          c.arc(bx, by, 7, 0, Math.PI * 2)
-          c.fill(); c.stroke()
-        }
-
-        // Freq label below handle
-        const freqLabel = band.freq >= 1000 ? `${(band.freq / 1000).toFixed(band.freq % 1000 === 0 ? 0 : 1)}k` : `${band.freq}`
-        c.fillStyle = 'rgba(255,255,255,0.7)'
-        c.fillText(freqLabel, bx, Math.min(by + 20, h - 2))
-        // dB label above handle (only if non-zero)
-        if (band.gain !== 0) {
-          c.fillStyle = color
-          c.fillText(`${band.gain > 0 ? '+' : ''}${band.gain}dB`, bx, Math.max(by - 12, 10))
-        }
+        c.fillStyle = active ? '#fff' : '#777'
+        c.font = 'bold 9px Inter, system-ui, sans-serif'
+        c.textAlign = 'center'
+        c.textBaseline = 'middle'
+        c.fillText(`${i + 1}`, bx, by)
       }
       c.textAlign = 'start'
     }
 
     // Noise gate threshold line
     if (liveS.noiseGateEnabled) {
-      const ngY = h - (liveS.noiseGateThreshold / 100) * h
+      const ngY = mT + plotH - (liveS.noiseGateThreshold / 100) * plotH
       c.strokeStyle = '#e94560'
       c.lineWidth = 2
       c.setLineDash([6, 4])
       c.beginPath()
-      c.moveTo(0, ngY)
+      c.moveTo(mL, ngY)
       c.lineTo(w, ngY)
       c.stroke()
       c.setLineDash([])
       c.fillStyle = '#e94560'
       c.font = '10px Inter, sans-serif'
-      c.fillText(`Gate ${liveS.noiseGateThreshold}%`, 4, ngY > 16 ? ngY - 4 : ngY + 14)
+      c.fillText(`Gate ${liveS.noiseGateThreshold}%`, mL + 4, ngY > mT + 16 ? ngY - 4 : ngY + 14)
     }
   }, [])
 
@@ -410,14 +523,55 @@ export default function SettingsPanel({ onClose }: Props) {
     if (cameraStream) {
       cameraStream.getTracks().forEach((t) => t.stop())
       setCameraStream(null)
+      setCameraCapabilities(null)
       return
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: settings.videoDevice ? { deviceId: { exact: settings.videoDevice } } : true,
-      })
+      const camSettings = settings.cameraSettings || {}
+      const videoConstraints: MediaTrackConstraints = settings.videoDevice
+        ? { deviceId: { exact: settings.videoDevice } }
+        : {}
+      // Apply stored resolution
+      if (camSettings.resolution && camSettings.resolution !== 'default') {
+        const [rw, rh] = camSettings.resolution.split('x').map(Number)
+        if (rw && rh) { videoConstraints.width = { ideal: rw }; videoConstraints.height = { ideal: rh } }
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ video: Object.keys(videoConstraints).length > 0 ? videoConstraints : true })
       setCameraStream(stream)
+      // Detect capabilities
+      const track = stream.getVideoTracks()[0]
+      if (track) {
+        try {
+          const caps = track.getCapabilities?.() as Record<string, unknown> | undefined
+          if (caps) setCameraCapabilities(caps)
+        } catch { /* getCapabilities not supported */ }
+        // Apply stored camera settings
+        const advanced: Record<string, unknown> = {}
+        if (camSettings.whiteBalanceMode) advanced.whiteBalanceMode = camSettings.whiteBalanceMode
+        if (camSettings.exposureMode) advanced.exposureMode = camSettings.exposureMode
+        if (camSettings.focusMode) advanced.focusMode = camSettings.focusMode
+        if (camSettings.exposureCompensation != null) advanced.exposureCompensation = camSettings.exposureCompensation
+        if (camSettings.exposureTime != null) advanced.exposureTime = camSettings.exposureTime
+        if (camSettings.iso != null) advanced.iso = camSettings.iso
+        if (camSettings.brightness != null) advanced.brightness = camSettings.brightness
+        if (camSettings.contrast != null) advanced.contrast = camSettings.contrast
+        if (camSettings.saturation != null) advanced.saturation = camSettings.saturation
+        if (camSettings.colorTemperature != null) advanced.colorTemperature = camSettings.colorTemperature
+        if (camSettings.sharpness != null) advanced.sharpness = camSettings.sharpness
+        if (Object.keys(advanced).length > 0) {
+          try { await track.applyConstraints({ advanced: [advanced] } as MediaTrackConstraints) } catch { /* unsupported */ }
+        }
+      }
     } catch { /* camera not available */ }
+  }
+
+  const applyCameraSetting = async (key: string, value: unknown) => {
+    const camSettings = { ...(settings.cameraSettings || {}), [key]: value }
+    update({ cameraSettings: camSettings })
+    const track = cameraStream?.getVideoTracks()[0]
+    if (track) {
+      try { await track.applyConstraints({ advanced: [{ [key]: value }] } as MediaTrackConstraints) } catch { /* unsupported */ }
+    }
   }
 
   // Spectrum analyzer canvas mouse handlers for dragging EQ band handles / noise gate
@@ -429,28 +583,61 @@ export default function SettingsPanel({ onClose }: Props) {
     return { nyquist, minF, maxF, logMin, logMax, logRange }
   }
 
+  // dB <-> Y coordinate mapping (must match drawSpectrum margins: mL=30, mB=14, mT=4)
+  const spectrumMargins = { mL: 30, mB: 14, mT: 4 }
+  const spectrumDbToY = (db: number, h: number): number => {
+    const { mT, mB } = spectrumMargins
+    const plotH = h - mB - mT
+    const maxDb = 24, minDb = -60, linearDb = -24, linearPct = 0.9
+    let py: number
+    if (db >= linearDb) py = (1 - (db - linearDb) / (maxDb - linearDb)) * linearPct * plotH
+    else py = (linearPct + (1 - linearPct) * (1 - (db - minDb) / (linearDb - minDb))) * plotH
+    return mT + py
+  }
+  const spectrumYToDb = (y: number, h: number): number => {
+    const { mT, mB } = spectrumMargins
+    const plotH = h - mB - mT
+    const maxDb = 24, minDb = -60, linearDb = -24, linearPct = 0.9
+    const pct = (y - mT) / plotH
+    if (pct <= linearPct) return linearDb + (1 - pct / linearPct) * (maxDb - linearDb)
+    return minDb + (1 - (pct - linearPct) / (1 - linearPct)) * (linearDb - minDb)
+  }
+  const spectrumXToFreq = (x: number, w: number): number => {
+    const { mL } = spectrumMargins
+    const plotW = w - mL
+    const { logMin, logRange } = spectrumLogParams()
+    return Math.pow(10, logMin + ((x - mL) / plotW) * logRange)
+  }
+  const spectrumFreqToX = (freq: number, w: number): number => {
+    const { mL } = spectrumMargins
+    const plotW = w - mL
+    const { logMin, logRange, minF } = spectrumLogParams()
+    return mL + ((Math.log10(Math.max(freq, minF)) - logMin) / logRange) * plotW
+  }
+
   const handleSpectrumMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = spectrumCanvasRef.current
     if (!canvas) return
     const rect = canvas.getBoundingClientRect()
-    const x = ((e.clientX - rect.left) / rect.width) * canvas.width
-    const y = ((e.clientY - rect.top) / rect.height) * canvas.height
-    const { logMin, logRange, minF } = spectrumLogParams()
-    const w = canvas.width, h = canvas.height
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    const w = rect.width, h = rect.height
     const prox = 16
 
     // Check EQ band handles
     const bands = settings.eqBands || []
     for (let i = 0; i < bands.length; i++) {
       const band = bands[i]!
-      const bx = ((Math.log10(Math.max(band.freq, minF)) - logMin) / logRange) * w
-      const by = h / 2 - (band.gain / 12) * (h / 2)
+      const bx = spectrumFreqToX(band.freq, w)
+      const by = spectrumDbToY(band.gain, h)
       const dist = Math.sqrt((x - bx) ** 2 + (y - by) ** 2)
       if (dist < prox) { canvasDragRef.current = { type: 'eq', bandIdx: i }; return }
     }
     // Check noise gate threshold line
     if (settings.noiseGateEnabled) {
-      const ngY = h - (settings.noiseGateThreshold / 100) * h
+      const { mT, mB } = spectrumMargins
+      const plotH = h - mB - mT
+      const ngY = mT + plotH - (settings.noiseGateThreshold / 100) * plotH
       if (Math.abs(y - ngY) < prox) { canvasDragRef.current = { type: 'noisegate' }; return }
     }
   }
@@ -461,21 +648,22 @@ export default function SettingsPanel({ onClose }: Props) {
     const canvas = spectrumCanvasRef.current
     if (!canvas) return
     const rect = canvas.getBoundingClientRect()
-    const x = ((e.clientX - rect.left) / rect.width) * canvas.width
-    const y = ((e.clientY - rect.top) / rect.height) * canvas.height
-    const { logMin, logRange } = spectrumLogParams()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
 
     if (drag.type === 'eq') {
-      const freq = Math.pow(10, logMin + (x / canvas.width) * logRange)
+      const freq = spectrumXToFreq(x, rect.width)
       const clampedFreq = Math.round(Math.max(20, Math.min(20000, freq)))
-      const gain = Math.round(Math.max(-12, Math.min(12, ((canvas.height / 2 - y) / (canvas.height / 2)) * 12)))
+      const gain = Math.round(Math.max(-60, Math.min(24, spectrumYToDb(y, rect.height))))
       const bands = [...(settings.eqBands || [])]
       if (bands[drag.bandIdx]) {
         bands[drag.bandIdx] = { ...bands[drag.bandIdx]!, freq: clampedFreq, gain }
         update({ eqBands: bands })
       }
     } else if (drag.type === 'noisegate') {
-      const threshold = Math.round(Math.max(0, Math.min(100, (1 - y / canvas.height) * 100)))
+      const { mT, mB } = spectrumMargins
+      const plotH = rect.height - mB - mT
+      const threshold = Math.round(Math.max(0, Math.min(100, (1 - (y - mT) / plotH) * 100)))
       update({ noiseGateThreshold: threshold })
     }
   }
@@ -487,22 +675,87 @@ export default function SettingsPanel({ onClose }: Props) {
     const canvas = spectrumCanvasRef.current
     if (!canvas) return
     const rect = canvas.getBoundingClientRect()
-    const x = ((e.clientX - rect.left) / rect.width) * canvas.width
-    const y = ((e.clientY - rect.top) / rect.height) * canvas.height
-    const { logMin, logRange, minF } = spectrumLogParams()
-    const w = canvas.width, h = canvas.height
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    const w = rect.width, h = rect.height
 
     const bands = settings.eqBands || []
     for (let i = 0; i < bands.length; i++) {
       const band = bands[i]!
-      const bx = ((Math.log10(Math.max(band.freq, minF)) - logMin) / logRange) * w
-      const by = h / 2 - (band.gain / 12) * (h / 2)
+      const bx = spectrumFreqToX(band.freq, w)
+      const by = spectrumDbToY(band.gain, h)
       if (Math.sqrt((x - bx) ** 2 + (y - by) ** 2) < 16) {
         setEqContextMenu({ x: e.clientX, y: e.clientY, bandIdx: i })
         return
       }
     }
     setEqContextMenu(null)
+  }
+
+  // EQ Export (EqualizerAPO format)
+  const handleEqExport = () => {
+    const bands = settings.eqBands || []
+    const typeMap: Record<string, string> = { peaking: 'PK', lowpass: 'LP', highpass: 'HP', lowshelf: 'LSC', highshelf: 'HSC' }
+    const lines = bands.map((b, i) => {
+      const ft = typeMap[b.type] || 'PK'
+      return `Filter ${i + 1}: ON ${ft} Fc ${b.freq} Hz Gain ${b.gain.toFixed(1)} dB Q 1.400`
+    })
+    const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/plain' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = 'eq-preset.txt'
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  // EQ Import (EqualizerAPO format)
+  const handleEqImport = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.txt,.text'
+    input.onchange = () => {
+      const file = input.files?.[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = () => {
+        const text = reader.result as string
+        const typeMap: Record<string, 'peaking' | 'lowpass' | 'highpass' | 'lowshelf' | 'highshelf'> = {
+          PK: 'peaking', LP: 'lowpass', HP: 'highpass', LSC: 'lowshelf', HSC: 'highshelf',
+        }
+        const parsed: { freq: number; gain: number; type: 'peaking' | 'lowpass' | 'highpass' | 'lowshelf' | 'highshelf' }[] = []
+        for (const line of text.split('\n')) {
+          const m = line.match(/^Filter\s+\d+:\s+ON\s+(\w+)\s+Fc\s+([\d.]+)\s+Hz\s+Gain\s+([-\d.]+)\s+dB/)
+          if (m) {
+            parsed.push({
+              freq: Math.round(parseFloat(m[2]!)),
+              gain: Math.round(parseFloat(m[3]!)),
+              type: typeMap[m[1]!] || 'peaking',
+            })
+          }
+        }
+        if (parsed.length > 0) {
+          // Map imported bands onto existing slots, or use imported count
+          const bands = parsed.slice(0, 10).map((p) => ({
+            freq: Math.max(20, Math.min(20000, p.freq)),
+            gain: Math.max(-60, Math.min(24, p.gain)),
+            type: p.type,
+          }))
+          // If fewer than 10, fill remaining with defaults
+          while (bands.length < 10) {
+            const def = settingsDefaults.eqBands[bands.length]
+            bands.push(def ? { ...def } : { freq: 1000, gain: 0, type: 'peaking' })
+          }
+          update({ eqBands: bands })
+        }
+      }
+      reader.readAsText(file)
+    }
+    input.click()
+  }
+
+  // EQ Reset to defaults
+  const handleEqReset = () => {
+    update({ eqBands: settingsDefaults.eqBands.map(b => ({ ...b })) })
   }
 
   const update = (partial: Partial<MediaSettings>) => {
@@ -670,6 +923,166 @@ export default function SettingsPanel({ onClose }: Props) {
                   ref={(el) => { if (el) el.srcObject = cameraStream }}
                 />
               )}
+
+              {cameraStream && cameraCapabilities && (() => {
+                const caps = cameraCapabilities
+                const cam = settings.cameraSettings || {}
+                type RangeCap = { min: number; max: number; step: number }
+                const hasRange = (k: string): RangeCap | null => {
+                  const v = caps[k] as RangeCap | undefined
+                  return v && typeof v.min === 'number' && typeof v.max === 'number' ? v : null
+                }
+                const hasModes = (k: string): string[] | null => {
+                  const v = caps[k] as string[] | undefined
+                  return Array.isArray(v) && v.length > 0 ? v : null
+                }
+                const resolutions = caps.width && caps.height
+                  ? (() => {
+                    const w = caps.width as RangeCap, h = caps.height as RangeCap
+                    if (!w?.max || !h?.max) return null
+                    const presets = [
+                      { label: 'Default', value: 'default' },
+                      ...[
+                        [640, 480, '480p'], [1280, 720, '720p'], [1920, 1080, '1080p'],
+                        [2560, 1440, '1440p'], [3840, 2160, '4K'],
+                      ].filter(([rw, rh]) => (rw as number) <= w.max && (rh as number) <= h.max)
+                        .map(([rw, rh, label]) => ({ label: label as string, value: `${rw}x${rh}` })),
+                    ]
+                    return presets.length > 1 ? presets : null
+                  })()
+                  : null
+
+                const wbModes = hasModes('whiteBalanceMode')
+                const expModes = hasModes('exposureMode')
+                const focusModes = hasModes('focusMode')
+                const expComp = hasRange('exposureCompensation')
+                const expTime = hasRange('exposureTime')
+                const isoRange = hasRange('iso')
+                const bright = hasRange('brightness')
+                const contrastRange = hasRange('contrast')
+                const satRange = hasRange('saturation')
+                const tempRange = hasRange('colorTemperature')
+                const sharpRange = hasRange('sharpness')
+
+                const anyAdvanced = resolutions || wbModes || expModes || focusModes || expComp || expTime || isoRange || bright || contrastRange || satRange || tempRange || sharpRange
+
+                if (!anyAdvanced) return <p className="settings-hint" style={{ marginTop: 8 }}>No advanced camera controls available for this device.</p>
+
+                return (
+                  <div style={{ marginTop: 8 }}>
+                    <h3 className="settings-section">Camera Settings</h3>
+                    <p className="settings-hint">Adjust camera hardware settings. Availability depends on your camera and browser.</p>
+
+                    {resolutions && (
+                      <label className="settings-slider">
+                        <span>Resolution</span>
+                        <select value={cam.resolution || 'default'} onChange={(e) => applyCameraSetting('resolution', e.target.value)}>
+                          {resolutions.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                        </select>
+                      </label>
+                    )}
+
+                    {wbModes && (
+                      <label className="settings-slider">
+                        <span>White Balance</span>
+                        <select value={cam.whiteBalanceMode || 'continuous'} onChange={(e) => applyCameraSetting('whiteBalanceMode', e.target.value)}>
+                          {wbModes.map(m => <option key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)}</option>)}
+                        </select>
+                      </label>
+                    )}
+
+                    {expModes && (
+                      <label className="settings-slider">
+                        <span>Exposure Mode</span>
+                        <select value={cam.exposureMode || 'continuous'} onChange={(e) => applyCameraSetting('exposureMode', e.target.value)}>
+                          {expModes.map(m => <option key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)}</option>)}
+                        </select>
+                      </label>
+                    )}
+
+                    {focusModes && (
+                      <label className="settings-slider">
+                        <span>Focus Mode</span>
+                        <select value={cam.focusMode || 'continuous'} onChange={(e) => applyCameraSetting('focusMode', e.target.value)}>
+                          {focusModes.map(m => <option key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)}</option>)}
+                        </select>
+                      </label>
+                    )}
+
+                    {expComp && (
+                      <label className="settings-slider">
+                        <span>Exposure Compensation</span>
+                        <input type="range" min={expComp.min} max={expComp.max} step={expComp.step}
+                          value={cam.exposureCompensation ?? 0} onChange={(e) => applyCameraSetting('exposureCompensation', Number(e.target.value))} />
+                        <span className="slider-value">{cam.exposureCompensation ?? 0}</span>
+                      </label>
+                    )}
+
+                    {expTime && (
+                      <label className="settings-slider">
+                        <span>Shutter Speed</span>
+                        <input type="range" min={expTime.min} max={Math.min(expTime.max, 100000)} step={expTime.step}
+                          value={cam.exposureTime ?? expTime.min} onChange={(e) => applyCameraSetting('exposureTime', Number(e.target.value))} />
+                        <span className="slider-value">{cam.exposureTime != null ? (cam.exposureTime >= 1000 ? `${(cam.exposureTime / 1000).toFixed(1)}ms` : `${cam.exposureTime}µs`) : 'auto'}</span>
+                      </label>
+                    )}
+
+                    {isoRange && (
+                      <label className="settings-slider">
+                        <span>ISO</span>
+                        <input type="range" min={isoRange.min} max={isoRange.max} step={isoRange.step}
+                          value={cam.iso ?? isoRange.min} onChange={(e) => applyCameraSetting('iso', Number(e.target.value))} />
+                        <span className="slider-value">{cam.iso ?? 'auto'}</span>
+                      </label>
+                    )}
+
+                    {bright && (
+                      <label className="settings-slider">
+                        <span>Brightness</span>
+                        <input type="range" min={bright.min} max={bright.max} step={bright.step}
+                          value={cam.brightness ?? Math.round((bright.min + bright.max) / 2)} onChange={(e) => applyCameraSetting('brightness', Number(e.target.value))} />
+                        <span className="slider-value">{cam.brightness ?? Math.round((bright.min + bright.max) / 2)}</span>
+                      </label>
+                    )}
+
+                    {contrastRange && (
+                      <label className="settings-slider">
+                        <span>Contrast</span>
+                        <input type="range" min={contrastRange.min} max={contrastRange.max} step={contrastRange.step}
+                          value={cam.contrast ?? Math.round((contrastRange.min + contrastRange.max) / 2)} onChange={(e) => applyCameraSetting('contrast', Number(e.target.value))} />
+                        <span className="slider-value">{cam.contrast ?? Math.round((contrastRange.min + contrastRange.max) / 2)}</span>
+                      </label>
+                    )}
+
+                    {satRange && (
+                      <label className="settings-slider">
+                        <span>Saturation</span>
+                        <input type="range" min={satRange.min} max={satRange.max} step={satRange.step}
+                          value={cam.saturation ?? Math.round((satRange.min + satRange.max) / 2)} onChange={(e) => applyCameraSetting('saturation', Number(e.target.value))} />
+                        <span className="slider-value">{cam.saturation ?? Math.round((satRange.min + satRange.max) / 2)}</span>
+                      </label>
+                    )}
+
+                    {tempRange && (
+                      <label className="settings-slider">
+                        <span>Color Temperature</span>
+                        <input type="range" min={tempRange.min} max={tempRange.max} step={tempRange.step}
+                          value={cam.colorTemperature ?? Math.round((tempRange.min + tempRange.max) / 2)} onChange={(e) => applyCameraSetting('colorTemperature', Number(e.target.value))} />
+                        <span className="slider-value">{cam.colorTemperature ?? Math.round((tempRange.min + tempRange.max) / 2)}K</span>
+                      </label>
+                    )}
+
+                    {sharpRange && (
+                      <label className="settings-slider">
+                        <span>Sharpness</span>
+                        <input type="range" min={sharpRange.min} max={sharpRange.max} step={sharpRange.step}
+                          value={cam.sharpness ?? Math.round((sharpRange.min + sharpRange.max) / 2)} onChange={(e) => applyCameraSetting('sharpness', Number(e.target.value))} />
+                        <span className="slider-value">{cam.sharpness ?? Math.round((sharpRange.min + sharpRange.max) / 2)}</span>
+                      </label>
+                    )}
+                  </div>
+                )
+              })()}
 
               <h3 className="settings-section">Screen Share</h3>
               <label className="settings-slider">
@@ -1018,7 +1431,7 @@ export default function SettingsPanel({ onClose }: Props) {
               {expandedNode === 'eq' && (
                 <div className="audio-chain-settings">
                   <h4>Parametric Equalizer</h4>
-                  <p className="settings-hint">Drag handles on the spectrum. Right-click a handle to change filter type. ±12 dB per band.</p>
+                  <p className="settings-hint">Drag handles on the spectrum. Right-click a handle to change filter type. -∞ to +24 dB per band.</p>
                   <div className="eq-sliders-grid">
                     {(settings.eqBands || []).map((band, i) => {
                       const typeLabels: Record<string, string> = { peaking: 'PK', lowpass: 'LP', highpass: 'HP', lowshelf: 'LS', highshelf: 'HS' }
@@ -1028,8 +1441,8 @@ export default function SettingsPanel({ onClose }: Props) {
                           <span className="eq-band-type">{typeLabels[band.type] || 'PK'}</span>
                           <input
                             type="range"
-                            min={-12}
-                            max={12}
+                            min={-60}
+                            max={24}
                             step={1}
                             value={band.gain}
                             className="eq-band-range"
@@ -1039,12 +1452,12 @@ export default function SettingsPanel({ onClose }: Props) {
                               update({ eqBands: bands })
                             }}
                           />
-                          <span className="eq-band-db">{band.gain > 0 ? '+' : ''}{band.gain}</span>
+                          <span className="eq-band-db">{band.gain <= -60 ? '-∞' : `${band.gain > 0 ? '+' : ''}${band.gain}`}</span>
                         </label>
                       )
                     })}
                   </div>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                     <button className="settings-preview-btn" onClick={() => update({ eqBands: (settings.eqBands || []).map(b => ({ ...b, gain: 0 })) })}>
                       Flat
                     </button>
@@ -1056,6 +1469,16 @@ export default function SettingsPanel({ onClose }: Props) {
                     </button>
                     <button className="settings-preview-btn" onClick={() => update({ eqBands: (settings.eqBands || []).map((b, i) => ({ ...b, gain: [0, 0, -1, -2, 0, 2, 4, 5, 4, 3][i] || 0 })) })}>
                       Treble Boost
+                    </button>
+                    <span style={{ borderLeft: '1px solid var(--border)', height: 20, margin: '0 4px' }} />
+                    <button className="settings-preview-btn" onClick={handleEqReset} title="Reset frequencies, gains, and types to defaults">
+                      ↺ Reset
+                    </button>
+                    <button className="settings-preview-btn" onClick={handleEqExport} title="Export as EqualizerAPO format (.txt)">
+                      ↓ Export
+                    </button>
+                    <button className="settings-preview-btn" onClick={handleEqImport} title="Import EqualizerAPO format (.txt)">
+                      ↑ Import
                     </button>
                   </div>
                 </div>
@@ -1135,8 +1558,6 @@ export default function SettingsPanel({ onClose }: Props) {
                 <canvas
                   ref={spectrumCanvasRef}
                   className="spectrum-analyzer"
-                  width={600}
-                  height={140}
                   onMouseDown={(e) => { setEqContextMenu(null); handleSpectrumMouseDown(e) }}
                   onMouseMove={handleSpectrumMouseMove}
                   onMouseUp={handleSpectrumMouseUp}

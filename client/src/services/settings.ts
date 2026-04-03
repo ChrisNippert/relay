@@ -29,11 +29,26 @@ export interface MediaSettings {
   notifyDMs: boolean         // play sound on DM messages
   desktopNotifications: boolean // show browser desktop notifications
   notificationVolume: number // 0-100
+  // Camera settings
+  cameraSettings: {
+    whiteBalanceMode?: string       // 'none' | 'manual' | 'single-shot' | 'continuous'
+    exposureMode?: string           // 'none' | 'manual' | 'single-shot' | 'continuous'
+    focusMode?: string              // 'none' | 'manual' | 'single-shot' | 'continuous'
+    exposureCompensation?: number
+    exposureTime?: number           // microseconds (shutter speed)
+    iso?: number
+    brightness?: number
+    contrast?: number
+    saturation?: number
+    colorTemperature?: number       // Kelvin
+    sharpness?: number
+    resolution?: string             // 'default' | 'WxH'
+  }
 }
 
 const STORAGE_KEY = 'relay_media_settings'
 
-const defaults: MediaSettings = {
+export const defaults: MediaSettings = {
   audioInputDevice: '',
   audioOutputDevice: '',
   videoDevice: '',
@@ -72,6 +87,7 @@ const defaults: MediaSettings = {
   notifyDMs: true,
   desktopNotifications: false,
   notificationVolume: 100,
+  cameraSettings: {},
 }
 
 export function getSettings(): MediaSettings {

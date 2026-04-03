@@ -390,7 +390,8 @@ html, body, #root {
   color: var(--text-muted);
   cursor: pointer;
   font-size: 1.05rem;
-  padding: 6px 10px;
+  padding: 6px 8px;
+  margin-left: -8px;
   border-radius: 4px;
   flex-shrink: 0;
   line-height: 1;
@@ -1540,7 +1541,7 @@ html, body, #root {
 }
 
 .chat-header {
-  padding: 12px 16px 12px 8px;
+  padding: 12px 16px 12px 16px;
   border-bottom: 1px solid var(--border);
   font-weight: 600;
   display: flex;
@@ -1782,16 +1783,35 @@ html, body, #root {
   gap: 8px;
   border-top: 1px solid var(--border);
   align-items: flex-end;
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
 }
 
+.message-input-wrapper {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  padding: 2px 4px;
+  transition: border-color 0.15s;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.message-input-wrapper:focus-within {
+  border-color: var(--accent);
+}
 
 .message-input input,
 .message-textarea {
   flex: 1;
-  padding: 10px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg-input);
+  padding: 8px 8px;
+  border-radius: 0;
+  border: none;
+  background: transparent;
   color: var(--text-primary);
   font-family: inherit;
   font-size: 0.95rem;
@@ -1801,15 +1821,16 @@ html, body, #root {
   min-height: 38px;
   max-height: 300px;
   line-height: 1.4;
+  min-width: 0;
 }
 
 .message-input input:focus,
 .message-textarea:focus {
-  border-color: var(--accent);
+  border-color: transparent;
 }
 
-.message-input button {
-  padding: 10px 20px;
+.message-send-btn {
+  padding: 10px 16px;
   border-radius: 8px;
   border: none;
   background: var(--accent);
@@ -1817,9 +1838,11 @@ html, body, #root {
   font-weight: 600;
   cursor: pointer;
   transition: background 0.2s;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
-.message-input button:hover {
+.message-send-btn:hover {
   background: var(--accent-hover);
 }
 
@@ -2538,7 +2561,8 @@ html, body, #root {
   overflow-y: auto;
   overflow-x: hidden;
   padding: 24px 40px;
-  max-width: 740px;
+  max-width: 900px;
+  margin: 0 auto;
   scrollbar-gutter: stable;
 }
 
@@ -3079,42 +3103,37 @@ html, body, #root {
    File Upload & Attachments
    ============================================ */
 
-.upload-btn {
-  background: none;
-  border: none;
-  font-size: 0.75rem;
-  cursor: pointer;
-  padding: 1px 3px;
-  border-radius: 4px;
-  opacity: 0.35;
-  transition: opacity 0.15s;
-  line-height: 1;
-}
-
-.upload-btn:hover {
-  opacity: 1;
-}
-
-/* ── Emoji Picker ─────────────────────────────────────────── */
+.upload-btn,
 .emoji-btn {
   background: none;
   border: none;
-  font-size: 0.75rem;
+  font-size: 1.25rem;
   cursor: pointer;
-  padding: 1px 3px;
+  padding: 6px 8px;
   border-radius: 4px;
-  opacity: 0.35;
-  transition: opacity 0.15s;
+  color: var(--text-muted);
+  opacity: 0.6;
+  transition: opacity 0.15s, color 0.15s;
   line-height: 1;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
+
+.upload-btn:hover,
 .emoji-btn:hover {
   opacity: 1;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
 }
+
+/* ── Emoji Picker ─────────────────────────────────────────── */
 
 .emoji-picker {
   position: absolute;
   bottom: 100%;
-  left: 0;
+  right: 0;
   width: 340px;
   max-height: 320px;
   overflow-y: auto;
@@ -3250,7 +3269,8 @@ html, body, #root {
 }
 
 .attachment-audio {
-  max-width: 400px;
+  max-width: 100%;
+  width: 100%;
 }
 
 .attachment-link {
@@ -4205,11 +4225,12 @@ html, body, #root {
 /* Spectrum Analyzer Canvas */
 .spectrum-analyzer {
   width: 100%;
-  height: 140px;
+  height: 240px;
   border-radius: 8px;
   cursor: crosshair;
   margin-top: 8px;
   display: block;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 .mic-level-meter {
@@ -4797,6 +4818,13 @@ html, body, #root {
   .members-sidebar-wrapper .members-sidebar {
     width: 180px;
   }
+  .settings-sidebar {
+    width: 180px;
+    min-width: 180px;
+  }
+  .settings-content {
+    padding: 20px 24px;
+  }
 }
 
 @media (max-width: 700px) {
@@ -4818,6 +4846,13 @@ html, body, #root {
   }
   .user-panel-names {
     max-width: 80px;
+  }
+  .settings-sidebar {
+    width: 160px;
+    min-width: 160px;
+  }
+  .settings-content {
+    padding: 16px 16px;
   }
 }
 
