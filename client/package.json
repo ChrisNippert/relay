@@ -3,12 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "electron:dev": "concurrently -k \"vite\" \"sleep 3 && electron .\"",
+    "electron:build": "tsc -b && vite build && electron-builder",
+    "electron:start": "electron ."
   },
   "dependencies": {
     "highlight.js": "^11.11.1",
@@ -20,8 +24,40 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
+    "electron": "^41.2.0",
+    "electron-builder": "^26.8.1",
     "typescript": "^6.0.2",
     "vite": "^8.0.2",
     "vitest": "^4.1.2"
+  },
+  "build": {
+    "appId": "com.relay.chat",
+    "productName": "Relay",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Network;Chat"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.social-networking"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
   }
 }

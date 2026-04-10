@@ -60,6 +60,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
   const [, setLocalSpeaking] = useState(false)
   const [focusedUser, setFocusedUser] = useState<string | null>(null)
   const [watchingTiles, setWatchingTiles] = useState<Set<string>>(new Set())
+  const prevTileTypeRef = useRef<Map<string, 'user' | 'screen'>>(new Map())
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map())
   const [remoteScreenStreams, setRemoteScreenStreams] = useState<Map<string, MediaStream>>(new Map())
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -81,6 +82,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
   const kickedRef = useRef(false)
   const remoteVadRef = useRef<Map<string, { ctx: AudioContext; animId: number }>>(new Map())
   const remoteGainRef = useRef<Map<string, { ctx: AudioContext; gain: GainNode }>>(new Map())
+  const eqFiltersRef = useRef<BiquadFilterNode[]>([])
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; userId: string; displayName: string; isSelf: boolean; tileId?: string } | null>(null)
   const [userVolumes, setUserVolumes] = useState<Record<string, number>>(() => getSettings().userVolumes || {})
   const tileLongPressRef = useRef<ReturnType<typeof setTimeout>>(undefined)
@@ -193,6 +195,52 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     return unsub
   }, [joined, channel.id])
 
+  // Rejoin voice channel after WebSocket reconnects (e.g. internet drop)
+  useEffect(() => {
+    if (!joined || !user) return
+    const unsub = subscribe((msg: WSMsg) => {
+      if (msg.type !== 'ws_reconnected') return
+      console.log('[Voice] WebSocket reconnected, rejoining voice channel')
+
+      // Re-announce voice join to server
+      sendVoiceJoin(channel.id)
+
+      // Re-broadcast our media state
+      sendVoiceMediaState(channel.id, {
+        muted,
+        deafened,
+        videoOn,
+        screenSharing,
+      })
+
+      // Close stale peer connections and re-establish with current voice users
+      for (const [userId, pc] of peersRef.current) {
+        pc.close()
+        peersRef.current.delete(userId)
+      }
+      primaryStreamIds.current.clear()
+
+      // Clean up stale remote state
+      stopAllRemoteVAD()
+      if (remoteAudioRef.current) remoteAudioRef.current.innerHTML = ''
+      for (const [key, g] of remoteGainRef.current) {
+        g.ctx.close().catch(() => {})
+        remoteGainRef.current.delete(key)
+      }
+
+      // Re-initiate calls with current voice users
+      api.getVoiceUsers(channel.id).then(async (currentUsers) => {
+        for (const uid of currentUsers) {
+          if (uid === user.id) continue
+          if (localStreamRef.current) {
+            await initiateCall(uid, localStreamRef.current)
+          }
+        }
+      }).catch(console.error)
+    })
+    return unsub
+  }, [joined, channel.id, user, muted, deafened, videoOn, screenSharing])
+
   // Expose controls to parent via ref
   useImperativeHandle(ref, () => ({
     toggleMute: () => toggleMute(),
@@ -289,6 +337,14 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     return () => window.removeEventListener('media-settings-changed', applyScreenSettings)
   }, [joined])
 
+  // Dynamically update audio bitrate when settings change
+  useEffect(() => {
+    if (!joined) return
+    const applyBitrate = () => applyAudioBitrate()
+    window.addEventListener('media-settings-changed', applyBitrate)
+    return () => window.removeEventListener('media-settings-changed', applyBitrate)
+  }, [joined])
+
   function toggleFullscreen() {
     if (document.fullscreenElement) {
       document.exitFullscreen()
@@ -309,6 +365,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       let lastNode: AudioNode = source
 
       const chainOrder = initSettings.audioChainOrder || ['eq', 'noisegate']
+      const createdEqFilters: BiquadFilterNode[] = []
       for (const nodeId of chainOrder) {
         if (nodeId === 'eq') {
           for (const band of initSettings.eqBands || []) {
@@ -320,6 +377,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
             eq.gain.value = band.gain
             lastNode.connect(eq)
             lastNode = eq
+            createdEqFilters.push(eq)
           }
         } else if (nodeId === 'highpass' && initSettings.highpassFreq > 0) {
           const highpass = ctx.createBiquadFilter()
@@ -338,6 +396,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         }
         // noisegate is handled via the gain node below
       }
+      eqFiltersRef.current = createdEqFilters
 
       const analyser = ctx.createAnalyser()
       analyser.fftSize = 512
@@ -379,6 +438,17 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         const now = performance.now()
         const aboveThreshold = !mutedRef.current && avg > threshold
 
+        // Live-update EQ filter gains/freqs from current settings
+        const liveBands = curSettings.eqBands || []
+        for (let i = 0; i < eqFiltersRef.current.length && i < liveBands.length; i++) {
+          const f = eqFiltersRef.current[i]!
+          const b = liveBands[i]!
+          if (f.gain.value !== b.gain) f.gain.setValueAtTime(b.gain, audioContextRef.current!.currentTime)
+          if (f.frequency.value !== b.freq) f.frequency.setValueAtTime(b.freq, audioContextRef.current!.currentTime)
+          const bType = b.type || 'peaking'
+          if (f.type !== bType) f.type = bType
+        }
+
         // Hold gate open after speech stops to avoid clipping word endings
         if (aboveThreshold) gateHoldUntil = now + curSettings.noiseGateHold
         const isSpeaking = aboveThreshold || now < gateHoldUntil
@@ -414,6 +484,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     cancelAnimationFrame(speakingAnimRef.current)
     analyserRef.current = null
     gainNodeRef.current = null
+    eqFiltersRef.current = []
     audioContextRef.current?.close()
     audioContextRef.current = null
     setLocalSpeaking(false)
@@ -541,6 +612,9 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
 
     const offer = await pc.createOffer()
     sendCallOffer(targetUserId, channel.id, offer)
+
+    // Apply audio bitrate to the new peer connection
+    applyAudioBitrate()
   }
 
   async function handleIncomingOffer(fromUserId: string, offer: RTCSessionDescriptionInit) {
@@ -593,6 +667,9 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     const answer = await pc.handleOffer(offer)
     sendCallAnswer(fromUserId, channel.id, answer)
     playCallRing()
+
+    // Apply audio bitrate to the new peer connection
+    applyAudioBitrate()
 
     // If we have video or screen share, the initial answer may not include them.
     // Renegotiate so the new peer receives our extra tracks.
@@ -760,16 +837,20 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       }
     } else {
       // Screen share stream from remote peer
-      setRemoteScreenStreams((prev) => {
-        const next = new Map(prev)
-        next.set(userId, stream)
-        return next
-      })
-      setVoiceUsers((prev) =>
-        prev.map((u) => u.id === userId ? { ...u, hasScreen: true } : u)
-      )
+      const hasVideo = stream.getVideoTracks().length > 0
 
-      // Play screen share audio if present
+      if (hasVideo) {
+        setRemoteScreenStreams((prev) => {
+          const next = new Map(prev)
+          next.set(userId, stream)
+          return next
+        })
+        setVoiceUsers((prev) =>
+          prev.map((u) => u.id === userId ? { ...u, hasScreen: true } : u)
+        )
+      }
+
+      // Play screen share audio if present (may arrive with video or as a separate audio-only stream)
       if (stream.getAudioTracks().length > 0) {
         console.log(`[ScreenAudio] Received ${stream.getAudioTracks().length} audio track(s) from ${userId}`, stream.getAudioTracks().map(t => ({ id: t.id, label: t.label, readyState: t.readyState, muted: t.muted })))
         const existingScreenAudio = document.getElementById(`remote-screen-audio-${userId}`)
@@ -1064,8 +1145,33 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
         }
         const screenHasAudio = screenStream.getAudioTracks().length > 0
         console.log(`[ScreenShare] Captured ${screenStream.getTracks().length} tracks: ${screenStream.getVideoTracks().length} video, ${screenStream.getAudioTracks().length} audio`)
+
+        // If getDisplayMedia didn't capture audio, try a fallback for Firefox/Linux:
+        // attempt to capture a monitor/loopback audio device if available
         if (!screenHasAudio) {
-          console.warn('[ScreenShare] No audio tracks captured. On Firefox/Linux, screen share audio only works when sharing a browser tab (not a window or entire screen).')
+          console.warn('[ScreenShare] No audio tracks from getDisplayMedia. Attempting loopback audio fallback...')
+          try {
+            // Look for a monitor/loopback device (PulseAudio/PipeWire expose these)
+            const devices = await navigator.mediaDevices.enumerateDevices()
+            const loopback = devices.find(d =>
+              d.kind === 'audioinput' && /monitor|loopback|stereo mix/i.test(d.label)
+            )
+            if (loopback) {
+              const loopbackStream = await navigator.mediaDevices.getUserMedia({
+                audio: { deviceId: { exact: loopback.deviceId } },
+              })
+              for (const at of loopbackStream.getAudioTracks()) {
+                screenStream.addTrack(at)
+                // Clean up loopback track when screen share ends
+                screenStream.getVideoTracks()[0]?.addEventListener('ended', () => at.stop())
+              }
+              console.log(`[ScreenShare] Added loopback audio from "${loopback.label}"`)
+            } else {
+              console.warn('[ScreenShare] No loopback/monitor audio device found. Screen share will have no audio. On Firefox, screen share audio only works when sharing a browser tab.')
+            }
+          } catch (err) {
+            console.warn('[ScreenShare] Loopback audio fallback failed:', err)
+          }
         }
         // Add tracks to peer connections — include streamId so receiver can group them
         screenStream.getTracks().forEach((t) => {
@@ -1144,6 +1250,31 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     }
   }
 
+  function applyAudioBitrate() {
+    const settings = getSettings()
+    const maxBitrateKbps = settings.audioBitrate
+    for (const pc of peersRef.current.values()) {
+      for (const sender of pc.pc.getSenders()) {
+        if (sender.track?.kind !== 'audio') continue
+        // Skip screen share audio tracks
+        if (screenStreamRef.current && screenStreamRef.current.getAudioTracks().some(t => t === sender.track)) continue
+        const params = sender.getParameters()
+        if (!params.encodings || params.encodings.length === 0) {
+          params.encodings = [{}]
+        }
+        const enc = params.encodings[0]!
+        if (maxBitrateKbps > 0) {
+          enc.maxBitrate = maxBitrateKbps * 1000
+        } else {
+          delete enc.maxBitrate
+        }
+        sender.setParameters(params).catch((err) => {
+          console.warn('[Audio] Failed to set bitrate:', err)
+        })
+      }
+    }
+  }
+
   // Build display tiles: separate tiles for camera and screen
   const displayTiles: { tileId: string; userId: string; displayName: string; isSelf: boolean; speaking: boolean; type: 'user' | 'screen'; hasVideo: boolean; hasScreen: boolean }[] = []
   for (const vu of voiceUsers) {
@@ -1151,19 +1282,23 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       // Two separate tiles: one for camera, one for screen
       displayTiles.push({ tileId: vu.id + '-cam', userId: vu.id, displayName: vu.displayName, isSelf: vu.isSelf, speaking: vu.speaking, type: 'user', hasVideo: true, hasScreen: false })
       displayTiles.push({ tileId: vu.id + '-screen', userId: vu.id, displayName: vu.displayName + ' (Screen)', isSelf: vu.isSelf, speaking: false, type: 'screen', hasVideo: false, hasScreen: true })
-      // Migrate watching: if user was watching the base tileId (screen-only), only auto-watch screen tile
-      if (watchingTiles.has(vu.id) && !watchingTiles.has(vu.id + '-screen')) {
+      // Migrate watching: if user was watching the base tileId, carry watching to whichever tile matches what they were previously showing
+      if (watchingTiles.has(vu.id) && !watchingTiles.has(vu.id + '-cam') && !watchingTiles.has(vu.id + '-screen')) {
+        const prevType = prevTileTypeRef.current.get(vu.id)
+        const migrateToScreen = prevType === 'screen'
         setWatchingTiles((prev) => {
           const next = new Set(prev)
           next.delete(vu.id)
-          next.add(vu.id + '-screen')
+          next.add(migrateToScreen ? vu.id + '-screen' : vu.id + '-cam')
           return next
         })
       }
+      prevTileTypeRef.current.set(vu.id, 'split' as any)
     } else if (vu.hasScreen) {
       displayTiles.push({ tileId: vu.id, userId: vu.id, displayName: vu.displayName, isSelf: vu.isSelf, speaking: vu.speaking, type: 'screen', hasVideo: false, hasScreen: true })
+      prevTileTypeRef.current.set(vu.id, 'screen')
       // Migrate: if split tiles exist from when user had both, merge back to base
-      if (watchingTiles.has(vu.id + '-screen') && !watchingTiles.has(vu.id)) {
+      if ((watchingTiles.has(vu.id + '-screen') || watchingTiles.has(vu.id + '-cam')) && !watchingTiles.has(vu.id)) {
         setWatchingTiles((prev) => {
           const next = new Set(prev)
           next.delete(vu.id + '-cam')
@@ -1174,6 +1309,18 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
       }
     } else {
       displayTiles.push({ tileId: vu.id, userId: vu.id, displayName: vu.displayName, isSelf: vu.isSelf, speaking: vu.speaking, type: 'user', hasVideo: vu.hasVideo, hasScreen: false })
+      prevTileTypeRef.current.set(vu.id, 'user')
+      // Migrate: if split tiles exist from when user had both, merge back to base
+      if ((watchingTiles.has(vu.id + '-cam') || watchingTiles.has(vu.id + '-screen')) && !watchingTiles.has(vu.id)) {
+        setWatchingTiles((prev) => {
+          const next = new Set(prev)
+          const wasWatching = next.has(vu.id + '-cam') || next.has(vu.id + '-screen')
+          next.delete(vu.id + '-cam')
+          next.delete(vu.id + '-screen')
+          if (wasWatching && vu.hasVideo) next.add(vu.id)
+          return next
+        })
+      }
       // Clean up stale watching entries when user no longer has media
       if (!vu.hasVideo && !vu.hasScreen) {
         if (watchingTiles.has(vu.id) || watchingTiles.has(vu.id + '-cam') || watchingTiles.has(vu.id + '-screen')) {

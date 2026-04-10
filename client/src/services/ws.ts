@@ -6,6 +6,7 @@ type MessageHandler = (msg: WSMessage) => void
 let ws: WebSocket | null = null
 let handlers: MessageHandler[] = []
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let hasConnectedBefore = false
 
 export function connect() {
   const token = getToken()
@@ -37,6 +38,11 @@ export function connect() {
       clearTimeout(reconnectTimer)
       reconnectTimer = null
     }
+    // Notify handlers that we reconnected (so voice channels can rejoin)
+    if (hasConnectedBefore) {
+      handlers.forEach((h) => h({ type: 'ws_reconnected', payload: {} }))
+    }
+    hasConnectedBefore = true
   }
 
   ws.onmessage = (ev) => {
@@ -65,6 +71,7 @@ export function disconnect() {
     clearTimeout(reconnectTimer)
     reconnectTimer = null
   }
+  hasConnectedBefore = false
   ws?.close()
   ws = null
 }

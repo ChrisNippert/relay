@@ -123,14 +123,26 @@ export default function SettingsPanel({ onClose }: Props) {
     ;(async () => {
       try {
         const curSettings = getSettings()
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            noiseSuppression: curSettings.noiseSuppression,
-            echoCancellation: false,
-            autoGainControl: curSettings.autoGainControl,
-            ...(curSettings.audioInputDevice ? { deviceId: { exact: curSettings.audioInputDevice } } : {}),
-          },
-        })
+        let stream: MediaStream
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              noiseSuppression: curSettings.noiseSuppression,
+              echoCancellation: false,
+              autoGainControl: curSettings.autoGainControl,
+              ...(curSettings.audioInputDevice ? { deviceId: { exact: curSettings.audioInputDevice } } : {}),
+            },
+          })
+        } catch {
+          // Fallback: retry with basic constraints if specific ones are rejected
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              audio: curSettings.audioInputDevice ? { deviceId: { ideal: curSettings.audioInputDevice } } : true,
+            })
+          } catch {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+          }
+        }
         if (cancelled) { stream.getTracks().forEach(t => t.stop()); return }
         const ctx = new AudioContext()
         if (ctx.state === 'suspended') await ctx.resume()
@@ -440,7 +452,20 @@ export default function SettingsPanel({ onClose }: Props) {
           ...(curSettings.audioInputDevice ? { deviceId: { exact: curSettings.audioInputDevice } } : {}),
         },
       }
-      const stream = await navigator.mediaDevices.getUserMedia(constraints)
+      let stream: MediaStream
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints)
+      } catch {
+        // Fallback: some browsers/devices reject specific constraints — retry with basic audio
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            audio: curSettings.audioInputDevice ? { deviceId: { ideal: curSettings.audioInputDevice } } : true,
+          })
+        } catch {
+          // Final fallback: most basic request
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        }
+      }
       setMicTestStream(stream)
 
       // Set up loopback audio playback
@@ -1593,6 +1618,23 @@ export default function SettingsPanel({ onClose }: Props) {
                   <span>Stereo</span>
                 </label>
               </div>
+
+              <h3 className="settings-section">Audio Bitrate</h3>
+              <label className="settings-slider">
+                <span>Voice Bitrate</span>
+                <select
+                  value={settings.audioBitrate}
+                  onChange={(e) => update({ audioBitrate: Number(e.target.value) })}
+                >
+                  <option value={0}>Auto</option>
+                  <option value={32}>32 kbps (Low)</option>
+                  <option value={64}>64 kbps</option>
+                  <option value={96}>96 kbps</option>
+                  <option value={128}>128 kbps</option>
+                  <option value={256}>256 kbps (High)</option>
+                  <option value={510}>510 kbps (Max / Opus)</option>
+                </select>
+              </label>
 
               <h3 className="settings-section">Signal Chain</h3>
               <p className="settings-hint">

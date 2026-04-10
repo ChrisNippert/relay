@@ -32,6 +32,7 @@ export class PeerConnection {
   onIceCandidate: ((candidate: RTCIceCandidateInit) => void) | null = null
   onRemoteStream: ((stream: MediaStream) => void) | null = null
   onDisconnected: (() => void) | null = null
+  private _remoteStreams = new Map<string, MediaStream>()
 
   constructor() {
     this.pc = new RTCPeerConnection(getICEConfig())
@@ -43,9 +44,21 @@ export class PeerConnection {
     }
 
     this.pc.ontrack = (ev) => {
-      // ev.streams[0] may be undefined on Firefox when tracks aren't associated with a stream
-      const stream = ev.streams[0] ?? new MediaStream([ev.track])
-      this.onRemoteStream?.(stream)
+      if (ev.streams[0]) {
+        // Browser properly associates tracks with streams — use it directly
+        // Cache so we can detect new vs existing
+        const streamId = ev.streams[0].id
+        if (!this._remoteStreams.has(streamId)) {
+          this._remoteStreams.set(streamId, ev.streams[0])
+        }
+        this.onRemoteStream?.(ev.streams[0])
+      } else {
+        // Firefox fallback: no stream association. Group by transceiver mid to
+        // approximate stream grouping. video tracks without a stream get their own
+        // stream. audio-only tracks also get their own to handle screen share audio.
+        const stream = new MediaStream([ev.track])
+        this.onRemoteStream?.(stream)
+      }
     }
 
     // Monitor connection state and trigger recovery on failures

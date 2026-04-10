@@ -20,6 +20,7 @@ export interface MediaSettings {
   eqBands: { freq: number; gain: number; type: 'peaking' | 'lowpass' | 'highpass' | 'lowshelf' | 'highshelf' }[]
   userVolumes: Record<string, number>  // per-user volume overrides (userId -> 0-200)
   audioChainOrder: string[]     // order of audio processing nodes ['eq', 'noisegate']
+  audioBitrate: number           // 0 = auto, in kbps (e.g. 32, 64, 96, 128, 256, 510)
   screenShareResolution: number // 0 = native, 360, 480, 720, 1080, 1440
   screenShareFramerate: number  // 15, 30, 60, 120
   screenShareMaxBitrate: number // 0 = auto, in kbps (e.g. 2500, 5000, 8000, 15000)
@@ -79,6 +80,7 @@ export const defaults: MediaSettings = {
   ],
   userVolumes: {},
   audioChainOrder: ['eq', 'noisegate'],
+  audioBitrate: 0,
   screenShareResolution: 0,
   screenShareFramerate: 30,
   screenShareMaxBitrate: 8000,

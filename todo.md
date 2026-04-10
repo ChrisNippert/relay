@@ -1,11 +1,13 @@
 # NOTE - NEVER EDIT THIS FILE IT ONLY GETS EDITED BY HAND
 # BUGS
 <!-- * Align the server name with the channel name in the main pane -->
+* Sometimes test microphone doesn't work for some people even though they are able to talk in a voice chat.
+* If internet disconnects and reconnects, it drops me off a call and doesn't reconnect.
 
 
 # QOL Stuff
 <!-- Maybe a file import or some AI noise supression that is togglable? -->
-* Add Camera settings support, for things like auto-color correction, iso, shutter speed, brightness, resolution, and the like
+<!-- * Screenshare Audio (apparently works on chrome but not firefox due to api specs) -->
 
 # UI QOL
 
@@ -85,3 +87,7 @@
 * When window size is large, settings page does not take up as much more space than when it is small.
 * Add a oled theme and a couple gradient themes that look fancy, some light, some dark, and ranging from cool fruity to sky spacy
 * Maybe a theme creator lil thing as well
+
+* EQ doesn't change anything that gets sent out, only what I hear of my own test mic
+* Be able to change audio bitrate
+* when I was watching a users camera, and they started to screenshare, their camera became "click to view" while there screenshare was viewable instantly
