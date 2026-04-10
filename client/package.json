@@ -1,6 +1,12 @@
 {
   "name": "relay-client",
   "version": "0.1.0",
+  "description": "Relay — self-hosted chat with voice, video, and screen sharing",
+  "author": {
+    "name": "Relay",
+    "email": "relay@localhost"
+  },
+  "homepage": "https://github.com/relay-chat/relay",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
