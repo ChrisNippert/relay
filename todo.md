@@ -4,6 +4,10 @@
 * Sometimes test microphone doesn't work for some people even though they are able to talk in a voice chat.
 * If internet disconnects and reconnects, it drops me off a call and doesn't reconnect.
 
+* Camera preview should fit the space available instead of scrop to small square. maybe at least center it
+* Camera preview goes black while im shifting parameters
+* justify and cleanly space parameters in camera settings view
+
 
 # QOL Stuff
 <!-- Maybe a file import or some AI noise supression that is togglable? -->

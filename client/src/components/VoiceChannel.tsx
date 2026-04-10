@@ -86,6 +86,16 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; userId: string; displayName: string; isSelf: boolean; tileId?: string } | null>(null)
   const [userVolumes, setUserVolumes] = useState<Record<string, number>>(() => getSettings().userVolumes || {})
   const tileLongPressRef = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const [screenPickerSources, setScreenPickerSources] = useState<Array<{ id: string; name: string; thumbnail: string }>>([])
+
+  // Listen for Electron desktop source picker (Linux)
+  useEffect(() => {
+    const eApi = (window as any).electronAPI
+    if (!eApi?.onDesktopSources) return
+    return eApi.onDesktopSources((sources: Array<{ id: string; name: string; thumbnail: string }>) => {
+      setScreenPickerSources(sources)
+    })
+  }, [])
 
   // Load server members for display names, or DM participants
   useEffect(() => {
@@ -1492,7 +1502,7 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
     return (
       <div
         key={tile.tileId}
-        className={`voice-tile ${tile.speaking ? 'speaking' : ''} ${tile.isSelf ? 'is-self' : ''} ${muted && tile.isSelf ? 'is-muted' : ''} ${isFocused ? 'focused' : ''} ${isUnfocused ? 'unfocused' : ''} ${(tile.hasVideo || tile.hasScreen) ? 'has-media' : ''}`}
+        className={`voice-tile ${tile.speaking ? 'speaking' : ''} ${tile.isSelf ? 'is-self' : ''} ${muted && tile.isSelf ? 'is-muted' : ''} ${tile.isSelf && !getSettings().cameraMirror ? 'no-mirror' : ''} ${isFocused ? 'focused' : ''} ${isUnfocused ? 'unfocused' : ''} ${(tile.hasVideo || tile.hasScreen) ? 'has-media' : ''}`}
         onClick={() => handleTileClick(tile.tileId)}
         onContextMenu={(e) => handleTileContextMenu(e, tile)}
         onTouchStart={(e) => handleTileTouchStart(e, tile)}
@@ -1671,6 +1681,39 @@ export default forwardRef<VoiceChannelHandle, Props>(function VoiceChannel({ cha
                 Kick from Voice
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Screen source picker for Electron on Linux */}
+      {screenPickerSources.length > 0 && (
+        <div className="screen-picker-overlay" onClick={() => {
+          (window as any).electronAPI?.cancelDesktopSource()
+          setScreenPickerSources([])
+        }}>
+          <div className="screen-picker-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="screen-picker-header">
+              <h3>Choose what to share</h3>
+              <button className="screen-picker-close" onClick={() => {
+                (window as any).electronAPI?.cancelDesktopSource()
+                setScreenPickerSources([])
+              }}>✕</button>
+            </div>
+            <div className="screen-picker-grid">
+              {screenPickerSources.map((source) => (
+                <button
+                  key={source.id}
+                  className="screen-picker-item"
+                  onClick={() => {
+                    (window as any).electronAPI?.selectDesktopSource(source.id)
+                    setScreenPickerSources([])
+                  }}
+                >
+                  <img src={source.thumbnail} alt={source.name} className="screen-picker-thumb" />
+                  <span className="screen-picker-name">{source.name}</span>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}

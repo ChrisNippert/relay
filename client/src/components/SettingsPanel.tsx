@@ -35,6 +35,7 @@ export default function SettingsPanel({ onClose }: Props) {
   const [tab, setTab] = useState<'profile' | 'audio-stack' | 'video' | 'theme' | 'devices' | 'notifications'>('profile')
   const [activeTheme, setActiveTheme] = useState(getThemeId)
   const [customThemes, setCustomThemes] = useState<Theme[]>(getCustomThemes)
+  const [nativeTitlebar, setNativeTitlebar] = useState(false)
   const [editingTheme, setEditingTheme] = useState<Theme | null>(null)
   const [textSettings, setTextSettingsState] = useState<TextSettings>(getTextSettings)
   const [micTestStream, setMicTestStream] = useState<MediaStream | null>(null)
@@ -75,6 +76,10 @@ export default function SettingsPanel({ onClose }: Props) {
   // Load pending count on mount for badge display
   useEffect(() => {
     api.getPendingDevices().then(setPendingDevices).catch(() => {})
+    // Load native titlebar preference in Electron
+    if ((window as any).electronAPI?.getNativeTitlebar) {
+      (window as any).electronAPI.getNativeTitlebar().then(setNativeTitlebar)
+    }
   }, [])
 
   // Only load devices when audio-stack or video tab is opened
@@ -594,9 +599,72 @@ export default function SettingsPanel({ onClose }: Props) {
     } catch { /* camera not available */ }
   }
 
+  const resetCameraToAuto = async () => {
+    const autoSettings: typeof settings.cameraSettings = {
+      resolution: 'default',
+      whiteBalanceMode: 'continuous',
+      exposureMode: 'continuous',
+      focusMode: 'continuous',
+    }
+    update({ cameraSettings: autoSettings })
+    const track = cameraStream?.getVideoTracks()[0]
+    if (track) {
+      // Restart stream at default resolution
+      cameraStream?.getTracks().forEach((t) => t.stop())
+      try {
+        const videoConstraints: MediaTrackConstraints = settings.videoDevice
+          ? { deviceId: { exact: settings.videoDevice } }
+          : {}
+        const stream = await navigator.mediaDevices.getUserMedia({ video: Object.keys(videoConstraints).length > 0 ? videoConstraints : true })
+        setCameraStream(stream)
+        const newTrack = stream.getVideoTracks()[0]
+        if (newTrack) {
+          try {
+            const caps = newTrack.getCapabilities?.() as Record<string, unknown> | undefined
+            if (caps) setCameraCapabilities(caps)
+          } catch { /* */ }
+          try {
+            await newTrack.applyConstraints({ advanced: [{
+              whiteBalanceMode: 'continuous',
+              exposureMode: 'continuous',
+              focusMode: 'continuous',
+            }] } as unknown as MediaTrackConstraints)
+          } catch { /* */ }
+        }
+      } catch { /* camera not available */ }
+    }
+  }
+
   const applyCameraSetting = async (key: string, value: unknown) => {
     const camSettings = { ...(settings.cameraSettings || {}), [key]: value }
     update({ cameraSettings: camSettings })
+    if (key === 'resolution' && cameraStream) {
+      // Resolution changes need a stream restart
+      cameraStream.getTracks().forEach((t) => t.stop())
+      try {
+        const videoConstraints: MediaTrackConstraints = settings.videoDevice
+          ? { deviceId: { exact: settings.videoDevice } }
+          : {}
+        if (value && value !== 'default') {
+          const [rw, rh] = (value as string).split('x').map(Number)
+          if (rw && rh) { videoConstraints.width = { ideal: rw }; videoConstraints.height = { ideal: rh } }
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({ video: Object.keys(videoConstraints).length > 0 ? videoConstraints : true })
+        setCameraStream(stream)
+        // Re-apply other camera settings to new track
+        const track = stream.getVideoTracks()[0]
+        if (track) {
+          const advanced: Record<string, unknown> = {}
+          for (const [k, v] of Object.entries(camSettings)) {
+            if (k !== 'resolution' && v != null) advanced[k] = v
+          }
+          if (Object.keys(advanced).length > 0) {
+            try { await track.applyConstraints({ advanced: [advanced] } as MediaTrackConstraints) } catch { /* unsupported */ }
+          }
+        }
+      } catch { /* camera not available */ }
+      return
+    }
     const track = cameraStream?.getVideoTracks()[0]
     if (track) {
       try { await track.applyConstraints({ advanced: [{ [key]: value }] } as MediaTrackConstraints) } catch { /* unsupported */ }
@@ -968,13 +1036,22 @@ export default function SettingsPanel({ onClose }: Props) {
                 {cameraStream ? 'Stop Preview' : 'Preview Camera'}
               </button>
               {cameraStream && (
-                <video
-                  className="settings-camera-preview"
-                  autoPlay
-                  playsInline
-                  muted
-                  ref={(el) => { if (el) el.srcObject = cameraStream }}
-                />
+                <>
+                  <video
+                    className={`settings-camera-preview${settings.cameraMirror ? ' mirrored' : ''}`}
+                    autoPlay
+                    playsInline
+                    muted
+                    ref={(el) => { if (el && el.srcObject !== cameraStream) el.srcObject = cameraStream }}
+                    key={cameraStream.id}
+                  />
+                  <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                    <label className="settings-toggle" style={{ flex: 1 }}>
+                      <span>Mirror</span>
+                      <input type="checkbox" checked={settings.cameraMirror} onChange={(e) => update({ cameraMirror: e.target.checked })} />
+                    </label>
+                  </div>
+                </>
               )}
 
               {cameraStream && cameraCapabilities && (() => {
@@ -1022,8 +1099,11 @@ export default function SettingsPanel({ onClose }: Props) {
                 if (!anyAdvanced) return <p className="settings-hint" style={{ marginTop: 8 }}>No advanced camera controls available for this device.</p>
 
                 return (
-                  <div style={{ marginTop: 8 }}>
-                    <h3 className="settings-section">Camera Settings</h3>
+                  <div className="camera-settings-grid">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <h3 className="settings-section" style={{ margin: 0 }}>Camera Settings</h3>
+                      <button className="settings-preview-btn" style={{ margin: 0, padding: '4px 12px', fontSize: 12 }} onClick={resetCameraToAuto}>Auto</button>
+                    </div>
                     <p className="settings-hint">Adjust camera hardware settings. Availability depends on your camera and browser.</p>
 
                     {resolutions && (
@@ -1185,6 +1265,24 @@ export default function SettingsPanel({ onClose }: Props) {
         )}
         {tab === 'theme' && (
           <div className="settings-body">
+            {(window as any).electronAPI?.isElectron && (
+              <>
+                <h3 className="settings-section">Window</h3>
+                <label className="settings-check">
+                  <input
+                    type="checkbox"
+                    checked={!!nativeTitlebar}
+                    onChange={async (e) => {
+                      const val = e.target.checked
+                      setNativeTitlebar(val)
+                      await (window as any).electronAPI.setNativeTitlebar(val)
+                      alert('Restart the app for the titlebar change to take effect.')
+                    }}
+                  />
+                  Use native (OS) titlebar
+                </label>
+              </>
+            )}
             <h3 className="settings-section">Themes</h3>
             <div className="theme-grid">
               {getAllThemes().map((theme) => (

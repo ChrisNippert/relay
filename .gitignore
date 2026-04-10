@@ -27,3 +27,4 @@ vendor/
 # Node
 node_modules/
 dist/
+release/

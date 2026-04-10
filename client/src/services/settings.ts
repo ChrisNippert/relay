@@ -30,6 +30,7 @@ export interface MediaSettings {
   notifyDMs: boolean         // play sound on DM messages
   desktopNotifications: boolean // show browser desktop notifications
   notificationVolume: number // 0-100
+  cameraMirror: boolean           // mirror camera preview
   // Camera settings
   cameraSettings: {
     whiteBalanceMode?: string       // 'none' | 'manual' | 'single-shot' | 'continuous'
@@ -89,6 +90,7 @@ export const defaults: MediaSettings = {
   notifyDMs: true,
   desktopNotifications: false,
   notificationVolume: 100,
+  cameraMirror: true,
   cameraSettings: {},
 }
 

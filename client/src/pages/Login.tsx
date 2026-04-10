@@ -1,5 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { getServerUrl, setServerUrl } from '../services/api'
+
+const isElectron = typeof window !== 'undefined' && (window as any).electronAPI?.isElectron
 
 export default function Login() {
   const { login, register } = useAuth()
@@ -8,11 +11,14 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [username, setUsername] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [server, setServer] = useState(getServerUrl())
+  const [showServer, setShowServer] = useState(isElectron || false)
   const [error, setError] = useState('')
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError('')
+    setServerUrl(server)
     try {
       if (isRegister) {
         await register(username, email, password, displayName || username)
@@ -31,6 +37,23 @@ export default function Login() {
         <p className="login-subtitle">{isRegister ? 'Create an account' : 'Welcome back'}</p>
 
         <form onSubmit={handleSubmit}>
+          {showServer && (
+            <label>
+              Server
+              <input
+                type="text"
+                value={server}
+                onChange={(e) => setServer(e.target.value)}
+                placeholder="https://relay.example.com"
+                autoComplete="url"
+              />
+            </label>
+          )}
+          {!isElectron && (
+            <button type="button" className="link-btn" style={{ fontSize: '0.8em', marginBottom: '0.5em' }} onClick={() => setShowServer(!showServer)}>
+              {showServer ? 'Hide server' : 'Custom server'}
+            </button>
+          )}
           {isRegister && (
             <>
               <label>
