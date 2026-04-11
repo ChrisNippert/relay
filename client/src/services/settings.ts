@@ -163,6 +163,7 @@ export interface Theme {
   name: string
   gradient?: string
   cssClass?: string
+  customCss?: string
   colors: ThemeColors
 }
 
@@ -260,6 +261,7 @@ export const THEME_PRESETS: Theme[] = [
   {
     id: 'colorful',
     name: 'Colorful',
+    cssClass: 'theme-colorful',
     colors: {
       '--bg-primary': '#1b1028',
       '--bg-secondary': '#251640',
@@ -315,26 +317,28 @@ export const THEME_PRESETS: Theme[] = [
   // --- Dark gradient themes ---
   {
     id: 'aurora',
-    name: 'Aurora',
-    gradient: 'linear-gradient(135deg, #0a0a1a 0%, #0d1b2a 40%, #1b2838 100%)',
+    name: 'Aurora Borealis',
+    cssClass: 'theme-aurora',
+    gradient: 'linear-gradient(180deg, #020814 0%, #041420 40%, #030e18 100%)',
     colors: {
-      '--bg-primary': '#0d1b2a',
-      '--bg-secondary': '#0a1628',
-      '--bg-tertiary': '#1b2838',
-      '--bg-input': '#162030',
-      '--text-primary': '#e0f0ff',
-      '--text-secondary': '#7ec8e3',
-      '--text-muted': '#4a7a8c',
-      '--accent': '#00d4aa',
-      '--accent-hover': '#00f0c0',
-      '--border': '#1a3040',
-      '--success': '#00d4aa',
+      '--bg-primary': '#030e18',
+      '--bg-secondary': '#020a14',
+      '--bg-tertiary': '#061820',
+      '--bg-input': '#041218',
+      '--text-primary': '#d8fff0',
+      '--text-secondary': '#60e8b0',
+      '--text-muted': '#2a8860',
+      '--accent': '#00e88a',
+      '--accent-hover': '#30ffaa',
+      '--border': '#0a2a1e',
+      '--success': '#00e88a',
       '--danger': '#ff4466',
     },
   },
   {
     id: 'nebula',
     name: 'Nebula',
+    cssClass: 'theme-nebula',
     gradient: 'linear-gradient(135deg, #1a0a2e 0%, #2d1b69 50%, #16213e 100%)',
     colors: {
       '--bg-primary': '#1a0a2e',
@@ -354,6 +358,7 @@ export const THEME_PRESETS: Theme[] = [
   {
     id: 'sunset',
     name: 'Sunset',
+    cssClass: 'theme-sunset',
     gradient: 'linear-gradient(135deg, #1a0a0a 0%, #2d1520 50%, #1a1025 100%)',
     colors: {
       '--bg-primary': '#1a0c10',
@@ -373,6 +378,7 @@ export const THEME_PRESETS: Theme[] = [
   {
     id: 'ocean',
     name: 'Deep Ocean',
+    cssClass: 'theme-ocean',
     gradient: 'linear-gradient(135deg, #020c1b 0%, #0a192f 50%, #112240 100%)',
     colors: {
       '--bg-primary': '#0a192f',
@@ -451,6 +457,7 @@ export const THEME_PRESETS: Theme[] = [
   {
     id: 'tropical',
     name: 'Tropical',
+    cssClass: 'theme-tropical',
     gradient: 'linear-gradient(135deg, #0a1a15 0%, #0a2018 50%, #102010 100%)',
     colors: {
       '--bg-primary': '#0c1a14',
@@ -470,6 +477,7 @@ export const THEME_PRESETS: Theme[] = [
   {
     id: 'berry',
     name: 'Berry Crush',
+    cssClass: 'theme-berry',
     gradient: 'linear-gradient(135deg, #1a0818 0%, #2a0a28 50%, #1a0620 100%)',
     colors: {
       '--bg-primary': '#1a0818',
@@ -490,6 +498,7 @@ export const THEME_PRESETS: Theme[] = [
   {
     id: 'cosmos',
     name: 'Cosmos',
+    cssClass: 'theme-cosmos',
     gradient: 'linear-gradient(135deg, #05050f 0%, #0a0a2a 40%, #150a30 100%)',
     colors: {
       '--bg-primary': '#08081a',
@@ -548,228 +557,145 @@ export const THEME_PRESETS: Theme[] = [
       '--danger': '#ff6888',
     },
   },
-  // --- Fun patterns ---
+  // --- Animated effect themes ---
   {
-    id: 'stripes',
-    name: 'Stripes',
-    cssClass: 'theme-stripes',
+    id: 'neon',
+    name: 'Neon City',
+    cssClass: 'theme-neon',
+    gradient: 'linear-gradient(135deg, #0a0010 0%, #0d0020 40%, #10001a 100%)',
     colors: {
-      '--bg-primary': '#141420',
-      '--bg-secondary': '#101018',
-      '--bg-tertiary': '#1c1c30',
-      '--bg-input': '#18182a',
-      '--text-primary': '#e8e8f0',
-      '--text-secondary': '#a0a0c0',
-      '--text-muted': '#606080',
-      '--accent': '#7c8cf8',
-      '--accent-hover': '#9aa4ff',
-      '--border': '#2a2a44',
-      '--success': '#5ae0a0',
-      '--danger': '#f06060',
-    },
-  },
-  {
-    id: 'checkerboard',
-    name: 'Checkerboard',
-    cssClass: 'theme-checkerboard',
-    colors: {
-      '--bg-primary': '#1a1a1a',
-      '--bg-secondary': '#141414',
-      '--bg-tertiary': '#222222',
-      '--bg-input': '#1e1e1e',
-      '--text-primary': '#e0e0e0',
-      '--text-secondary': '#a0a0a0',
-      '--text-muted': '#606060',
-      '--accent': '#e8e8e8',
-      '--accent-hover': '#ffffff',
-      '--border': '#2a2a2a',
-      '--success': '#50c878',
-      '--danger': '#e05050',
-    },
-  },
-  {
-    id: 'polkadots',
-    name: 'Polka Dots',
-    cssClass: 'theme-polkadots',
-    colors: {
-      '--bg-primary': '#1a1028',
-      '--bg-secondary': '#140c20',
-      '--bg-tertiary': '#221638',
-      '--bg-input': '#1c1030',
+      '--bg-primary': '#0a0014',
+      '--bg-secondary': '#080010',
+      '--bg-tertiary': '#14002a',
+      '--bg-input': '#10001e',
       '--text-primary': '#f0e0ff',
-      '--text-secondary': '#c0a0d8',
-      '--text-muted': '#7060a0',
-      '--accent': '#ff80c0',
-      '--accent-hover': '#ffa0d0',
-      '--border': '#2a1840',
-      '--success': '#80e0a0',
-      '--danger': '#ff5080',
+      '--text-secondary': '#c080ff',
+      '--text-muted': '#6040a0',
+      '--accent': '#ff00ff',
+      '--accent-hover': '#ff44ff',
+      '--border': '#2a0050',
+      '--success': '#00ff88',
+      '--danger': '#ff0055',
     },
   },
   {
-    id: 'neapolitan',
-    name: 'Neapolitan',
-    cssClass: 'theme-neapolitan',
-    gradient: 'linear-gradient(180deg, #3a1a1a 0%, #3a1a1a 33%, #f5e6d0 33%, #f5e6d0 66%, #1a0e0a 66%, #1a0e0a 100%)',
+    id: 'matrix',
+    name: 'Matrix',
+    cssClass: 'theme-matrix',
+    gradient: 'linear-gradient(180deg, #000800 0%, #001208 50%, #000a04 100%)',
     colors: {
-      '--bg-primary': '#2a1515',
-      '--bg-secondary': '#1e1010',
-      '--bg-tertiary': '#3a1a1a',
-      '--bg-input': '#2e1818',
-      '--text-primary': '#f5e6d0',
-      '--text-secondary': '#d4a8a0',
-      '--text-muted': '#8a5a5a',
-      '--accent': '#e8a0b0',
-      '--accent-hover': '#f0b8c0',
-      '--border': '#4a2828',
-      '--success': '#80c8a0',
-      '--danger': '#e05050',
+      '--bg-primary': '#000a04',
+      '--bg-secondary': '#000800',
+      '--bg-tertiary': '#001a0a',
+      '--bg-input': '#001208',
+      '--text-primary': '#00ff41',
+      '--text-secondary': '#00cc33',
+      '--text-muted': '#007722',
+      '--accent': '#00ff41',
+      '--accent-hover': '#33ff66',
+      '--border': '#003a12',
+      '--success': '#00ff41',
+      '--danger': '#ff2020',
     },
   },
   {
-    id: 'zigzag',
-    name: 'Zigzag',
-    cssClass: 'theme-zigzag',
+    id: 'lava',
+    name: 'Lava Lamp',
+    cssClass: 'theme-lava',
+    gradient: 'linear-gradient(135deg, #1a0000 0%, #200808 40%, #1a0500 100%)',
     colors: {
-      '--bg-primary': '#0e1a18',
-      '--bg-secondary': '#0a1412',
-      '--bg-tertiary': '#142420',
-      '--bg-input': '#10201c',
-      '--text-primary': '#d0f0e8',
-      '--text-secondary': '#80c0a8',
-      '--text-muted': '#508070',
-      '--accent': '#40e0d0',
-      '--accent-hover': '#60f0e0',
-      '--border': '#1a3830',
-      '--success': '#40e0a0',
-      '--danger': '#f06060',
-    },
-  },
-  // --- Pride flags (UI colors inspired by flag palettes) ---
-  {
-    id: 'pride-rainbow',
-    name: '🏳️‍🌈 Rainbow',
-    colors: {
-      '--bg-primary': '#1e1030',
-      '--bg-secondary': '#2a1040',
-      '--bg-tertiary': '#341250',
-      '--bg-input': '#22103a',
-      '--text-primary': '#fff8e8',
-      '--text-secondary': '#ffcc66',
-      '--text-muted': '#a07850',
-      '--accent': '#e44040',
-      '--accent-hover': '#ff6040',
-      '--border': '#4a2068',
-      '--success': '#00a030',
-      '--danger': '#e44040',
+      '--bg-primary': '#140000',
+      '--bg-secondary': '#100000',
+      '--bg-tertiary': '#200808',
+      '--bg-input': '#1a0404',
+      '--text-primary': '#ffe0d0',
+      '--text-secondary': '#ff9060',
+      '--text-muted': '#884430',
+      '--accent': '#ff4400',
+      '--accent-hover': '#ff6622',
+      '--border': '#3a1008',
+      '--success': '#ffaa00',
+      '--danger': '#ff2200',
     },
   },
   {
-    id: 'pride-trans',
-    name: '🏳️‍⚧️ Trans',
+    id: 'holographic',
+    name: 'Holographic',
+    cssClass: 'theme-holographic',
+    gradient: 'linear-gradient(135deg, #0a0a18 0%, #0e0818 40%, #080a1a 100%)',
     colors: {
-      '--bg-primary': '#1a2838',
-      '--bg-secondary': '#2a1828',
-      '--bg-tertiary': '#1e3040',
-      '--bg-input': '#24202e',
-      '--text-primary': '#f0f4ff',
-      '--text-secondary': '#f7a8b8',
-      '--text-muted': '#7090a8',
-      '--accent': '#55cdfc',
-      '--accent-hover': '#80d8ff',
-      '--border': '#3a2840',
-      '--success': '#55cdaa',
-      '--danger': '#f07088',
+      '--bg-primary': '#0a0a16',
+      '--bg-secondary': '#080812',
+      '--bg-tertiary': '#12121e',
+      '--bg-input': '#0e0e1a',
+      '--text-primary': '#e8e8ff',
+      '--text-secondary': '#b0b0e0',
+      '--text-muted': '#5858a0',
+      '--accent': '#c0a0ff',
+      '--accent-hover': '#d8c0ff',
+      '--border': '#1e1e3a',
+      '--success': '#80ffcc',
+      '--danger': '#ff6688',
     },
   },
   {
-    id: 'pride-bi',
-    name: '🩷💜💙 Bi',
+    id: 'fire',
+    name: 'Fireplace',
+    cssClass: 'theme-fire',
+    gradient: 'linear-gradient(180deg, #0c0200 0%, #140600 50%, #0a0100 100%)',
     colors: {
-      '--bg-primary': '#1a1030',
-      '--bg-secondary': '#2e0c3e',
-      '--bg-tertiary': '#0c1838',
-      '--bg-input': '#1e1028',
-      '--text-primary': '#f0e0ff',
-      '--text-secondary': '#d898d0',
-      '--text-muted': '#7858a0',
-      '--accent': '#d6026e',
-      '--accent-hover': '#e840a0',
-      '--border': '#3a1860',
-      '--success': '#60c0a0',
-      '--danger': '#d6026e',
+      '--bg-primary': '#0c0200',
+      '--bg-secondary': '#0a0100',
+      '--bg-tertiary': '#1a0800',
+      '--bg-input': '#140400',
+      '--text-primary': '#ffe8cc',
+      '--text-secondary': '#ffaa44',
+      '--text-muted': '#884400',
+      '--accent': '#ff6600',
+      '--accent-hover': '#ff8833',
+      '--border': '#2a1000',
+      '--success': '#ffcc00',
+      '--danger': '#ff2200',
     },
   },
   {
-    id: 'pride-lesbian',
-    name: '🧡🤍💜 Lesbian',
+    id: 'cyberpunk',
+    name: 'Cyberpunk',
+    cssClass: 'theme-cyberpunk',
+    gradient: 'linear-gradient(135deg, #0a001a 0%, #14002a 40%, #0a0014 100%)',
     colors: {
-      '--bg-primary': '#281018',
-      '--bg-secondary': '#3a0820',
-      '--bg-tertiary': '#201828',
-      '--bg-input': '#2e1020',
-      '--text-primary': '#ffe8f0',
-      '--text-secondary': '#ef7636',
-      '--text-muted': '#a06070',
-      '--accent': '#d52d00',
-      '--accent-hover': '#ef6536',
-      '--border': '#4a1830',
-      '--success': '#d098b0',
-      '--danger': '#a30262',
+      '--bg-primary': '#0a0018',
+      '--bg-secondary': '#080014',
+      '--bg-tertiary': '#160028',
+      '--bg-input': '#10001e',
+      '--text-primary': '#eae0ff',
+      '--text-secondary': '#ffd000',
+      '--text-muted': '#8060a0',
+      '--accent': '#ff003c',
+      '--accent-hover': '#ff3366',
+      '--border': '#2a004a',
+      '--success': '#00ffaa',
+      '--danger': '#ff003c',
     },
   },
   {
-    id: 'pride-nonbinary',
-    name: '💛🤍💜🖤 Nonbinary',
+    id: 'flame',
+    name: 'Flame',
+    cssClass: 'theme-flame',
+    gradient: 'linear-gradient(180deg, #0d0200 0%, #1a0600 40%, #100300 100%)',
     colors: {
-      '--bg-primary': '#1a1420',
-      '--bg-secondary': '#0e0c10',
-      '--bg-tertiary': '#282030',
-      '--bg-input': '#1c1624',
-      '--text-primary': '#fcf4d0',
-      '--text-secondary': '#e0d8c0',
-      '--text-muted': '#8878a0',
-      '--accent': '#c8b800',
-      '--accent-hover': '#e0d030',
-      '--border': '#3a2850',
-      '--success': '#9c59d1',
-      '--danger': '#c04040',
-    },
-  },
-  {
-    id: 'pride-ace',
-    name: '🖤🩶🤍💜 Ace',
-    colors: {
-      '--bg-primary': '#121014',
-      '--bg-secondary': '#1c1620',
-      '--bg-tertiary': '#0a0a0c',
-      '--bg-input': '#161218',
-      '--text-primary': '#e8e0f0',
-      '--text-secondary': '#a8a0b8',
-      '--text-muted': '#606068',
-      '--accent': '#810081',
-      '--accent-hover': '#a800a8',
-      '--border': '#2a2230',
-      '--success': '#70a080',
-      '--danger': '#a04060',
-    },
-  },
-  {
-    id: 'pride-pan',
-    name: '💗💛💙 Pan',
-    colors: {
-      '--bg-primary': '#1a1028',
-      '--bg-secondary': '#280820',
-      '--bg-tertiary': '#0c1830',
-      '--bg-input': '#201028',
-      '--text-primary': '#fff0f8',
-      '--text-secondary': '#ffd866',
-      '--text-muted': '#8870a0',
-      '--accent': '#ff218c',
-      '--accent-hover': '#ff50a0',
-      '--border': '#3a1848',
-      '--success': '#21b1ff',
-      '--danger': '#ff218c',
+      '--bg-primary': '#0d0200',
+      '--bg-secondary': '#0a0100',
+      '--bg-tertiary': '#1c0800',
+      '--bg-input': '#150400',
+      '--text-primary': '#fff0d8',
+      '--text-secondary': '#ffb860',
+      '--text-muted': '#8a4800',
+      '--accent': '#ff7000',
+      '--accent-hover': '#ff9030',
+      '--border': '#301200',
+      '--success': '#ffc800',
+      '--danger': '#ff3000',
     },
   },
 ]
@@ -797,11 +723,32 @@ export function applyTheme(theme: Theme) {
     root.style.removeProperty('--bg-gradient')
     root.classList.remove('gradient-theme')
   }
-  // Remove all theme-specific css classes, then add the current one
-  const themeCssClasses = THEME_PRESETS.map((t) => t.cssClass).filter(Boolean) as string[]
+  // Remove all theme-specific css classes (built-in + custom), then add the current one
+  const allThemes = getAllThemes()
+  const themeCssClasses = allThemes.map((t) => t.cssClass).filter(Boolean) as string[]
   root.classList.remove(...themeCssClasses)
   if (theme.cssClass) {
     root.classList.add(theme.cssClass)
+  }
+  // Also apply theme class directly on .main-content for effect selectors
+  const mainEl = document.getElementById('app-main')
+  if (mainEl) {
+    mainEl.classList.remove(...themeCssClasses)
+    if (theme.cssClass) {
+      mainEl.classList.add(theme.cssClass)
+    }
+  }
+  // Inject or remove custom CSS
+  let styleEl = document.getElementById('relay-custom-theme-css') as HTMLStyleElement | null
+  if (theme.customCss) {
+    if (!styleEl) {
+      styleEl = document.createElement('style')
+      styleEl.id = 'relay-custom-theme-css'
+      document.head.appendChild(styleEl)
+    }
+    styleEl.textContent = theme.customCss
+  } else if (styleEl) {
+    styleEl.textContent = ''
   }
 }
 

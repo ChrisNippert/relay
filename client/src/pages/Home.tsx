@@ -805,7 +805,7 @@ export default function Home() {
       </div>
       <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); channelResizing.current = true; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none' }} />
 
-      <div className="main-content">
+      <div id="app-main" className="main-content">
         {/* Persistent voice channel — stays mounted to keep WebRTC alive */}
         {activeVoiceChannel && (
           <div className="voice-channel-wrapper" style={{ display: isViewingActiveVoice ? 'flex' : 'none' }}>

@@ -905,6 +905,14 @@ export default function SettingsPanel({ onClose }: Props) {
     setTimeout(onClose, 200)
   }
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleClose()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
   return (
     <div className={`settings-overlay ${closing ? 'closing' : ''}`} onClick={handleClose}>
       <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
@@ -1301,7 +1309,7 @@ export default function SettingsPanel({ onClose }: Props) {
                       <div className="theme-preview-dot" style={{ background: theme.colors['--text-muted'] }} />
                       <div className="theme-preview-dot" style={{ background: theme.colors['--text-muted'] }} />
                     </div>
-                    <div className="theme-preview-main" style={{ background: theme.gradient || theme.colors['--bg-primary'] }}>
+                    <div className={`theme-preview-main main-content${theme.cssClass ? ' ' + theme.cssClass : ''}`} style={{ background: theme.gradient || theme.colors['--bg-primary'] }}>
                       <div className="theme-preview-msg" style={{ background: theme.colors['--bg-secondary'], borderColor: theme.colors['--border'] }} />
                       <div className="theme-preview-msg" style={{ background: theme.colors['--bg-secondary'], borderColor: theme.colors['--border'] }} />
                       <div className="theme-preview-input" style={{ background: theme.colors['--bg-input'], borderColor: theme.colors['--border'] }} />
@@ -1311,7 +1319,7 @@ export default function SettingsPanel({ onClose }: Props) {
                   {activeTheme === theme.id && <span className="theme-card-check">✓</span>}
                   {customThemes.some((c) => c.id === theme.id) && (
                     <span className="theme-card-actions">
-                      <button className="theme-action-btn" title="Edit" onClick={(e) => { e.stopPropagation(); setEditingTheme({ ...theme, colors: { ...theme.colors } }) }}>✎</button>
+                      <button className="theme-action-btn" title="Edit" onClick={(e) => { e.stopPropagation(); const t = { ...theme, colors: { ...theme.colors } }; setEditingTheme(t); applyTheme(t) }}>✎</button>
                       <button className="theme-action-btn theme-action-delete" title="Delete" onClick={(e) => {
                         e.stopPropagation()
                         const next = customThemes.filter((c) => c.id !== theme.id)
@@ -1339,11 +1347,34 @@ export default function SettingsPanel({ onClose }: Props) {
                   id: `custom-${Date.now()}`,
                   name: 'My Theme',
                   gradient: base.gradient,
+                  cssClass: base.cssClass,
+                  customCss: base.customCss,
                   colors: { ...base.colors },
                 })
               }}>+ New Theme from Current</button>
             ) : (
               <div className="theme-editor">
+                <div className="theme-editor-live-preview">
+                  <div className={`main-content${editingTheme.cssClass ? ' ' + editingTheme.cssClass : ''}`} style={{ background: editingTheme.gradient || editingTheme.colors['--bg-primary'], position: 'relative', overflow: 'hidden', isolation: 'isolate', borderRadius: '6px', height: '120px' }}>
+                    <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%', padding: '10px', gap: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ width: 24, height: 24, borderRadius: '50%', background: editingTheme.colors['--accent'], flexShrink: 0 }} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '0.7rem', color: editingTheme.colors['--text-primary'], fontWeight: 600 }}>User</div>
+                          <div style={{ fontSize: '0.65rem', color: editingTheme.colors['--text-secondary'] }}>This is a sample message</div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ width: 24, height: 24, borderRadius: '50%', background: editingTheme.colors['--success'], flexShrink: 0 }} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: '0.7rem', color: editingTheme.colors['--text-primary'], fontWeight: 600 }}>Another User</div>
+                          <div style={{ fontSize: '0.65rem', color: editingTheme.colors['--text-secondary'] }}>Hey, looking good! 🎨</div>
+                        </div>
+                      </div>
+                      <div style={{ background: editingTheme.colors['--bg-input'], border: `1px solid ${editingTheme.colors['--border']}`, borderRadius: '4px', padding: '4px 8px', fontSize: '0.6rem', color: editingTheme.colors['--text-muted'] }}>Send a message...</div>
+                    </div>
+                  </div>
+                </div>
                 <div className="theme-editor-row">
                   <label>Name</label>
                   <input
@@ -1382,6 +1413,37 @@ export default function SettingsPanel({ onClose }: Props) {
                       <span className="theme-color-label">{key.replace('--', '').replace(/-/g, ' ')}</span>
                     </div>
                   ))}
+                </div>
+                <div className="theme-editor-row">
+                  <label>CSS Class</label>
+                  <input
+                    type="text"
+                    value={editingTheme.cssClass || ''}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^a-zA-Z0-9_-]/g, '')
+                      const updated = { ...editingTheme, cssClass: val || undefined }
+                      setEditingTheme(updated)
+                      applyTheme(updated)
+                    }}
+                    className="theme-editor-input"
+                    placeholder="e.g. theme-myeffect"
+                    maxLength={40}
+                  />
+                </div>
+                <div className="theme-editor-row">
+                  <label>Custom CSS Effects</label>
+                  <textarea
+                    value={editingTheme.customCss || ''}
+                    onChange={(e) => {
+                      const updated = { ...editingTheme, customCss: e.target.value || undefined }
+                      setEditingTheme(updated)
+                      applyTheme(updated)
+                    }}
+                    className="theme-editor-css"
+                    placeholder={`.main-content::before {\n  content: '';\n  position: absolute;\n  inset: 0;\n  z-index: -1;\n  pointer-events: none;\n  background: radial-gradient(...);\n  animation: myEffect 10s infinite;\n}\n@keyframes myEffect {\n  0% { opacity: 0.5; }\n  100% { opacity: 1; }\n}`}
+                    spellCheck={false}
+                    rows={10}
+                  />
                 </div>
                 <div className="theme-editor-actions">
                   <button className="theme-save-btn" onClick={() => {

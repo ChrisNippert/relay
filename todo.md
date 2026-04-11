@@ -8,6 +8,9 @@
 * Camera preview goes black while im shifting parameters
 * justify and cleanly space parameters in camera settings view
 
+* Screenshare button doesn't work on windows
+* 
+
 
 # QOL Stuff
 <!-- Maybe a file import or some AI noise supression that is togglable? -->
