@@ -63,7 +63,7 @@
   --text-muted: #666680;
   --accent: #e94560;
   --accent-hover: #ff6b81;
-  --border: #2a2a4a;
+  --border: #2e2e52;
   --success: #4ecdc4;
   --danger: #e94560;
   --font-family: 'Inter', system-ui, -apple-system, sans-serif;
@@ -648,35 +648,23 @@ html, body, #root {
   100% { transform: translate(-6%, 4%) scale(0.92); }
 }
 
-/* --- Deep Ocean (water wave caustics) --- */
+/* --- Deep Ocean (undulating water waves + caustics) --- */
 .main-content.theme-ocean::before {
   content: '';
   position: absolute;
-  inset: 0;
+  inset: -20% -10%;
   z-index: -1;
   pointer-events: none;
   background:
-    /* Wave crests — horizontal bands that drift */
-    repeating-linear-gradient(0deg,
-      transparent 0px,
-      transparent 40px,
-      rgba(0, 140, 220, 0.04) 42px,
-      rgba(0, 160, 255, 0.06) 46px,
-      rgba(0, 140, 220, 0.04) 50px,
-      transparent 52px,
-      transparent 90px
-    ),
-    repeating-linear-gradient(0deg,
-      transparent 0px,
-      transparent 65px,
-      rgba(0, 120, 200, 0.03) 67px,
-      rgba(0, 150, 240, 0.05) 72px,
-      rgba(0, 120, 200, 0.03) 77px,
-      transparent 79px,
-      transparent 130px
-    );
-  background-size: 100% 100%, 100% 100%;
-  animation: oceanWaves1 8s ease-in-out infinite;
+    radial-gradient(ellipse 60% 8% at 15% 20%, rgba(0, 130, 200, 0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 70% 6% at 50% 35%, rgba(0, 140, 220, 0.035) 0%, transparent 70%),
+    radial-gradient(ellipse 55% 7% at 80% 15%, rgba(0, 120, 210, 0.03) 0%, transparent 70%),
+    radial-gradient(ellipse 65% 9% at 30% 50%, rgba(0, 150, 230, 0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 50% 6% at 70% 60%, rgba(0, 130, 215, 0.035) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 8% at 20% 75%, rgba(0, 140, 225, 0.03) 0%, transparent 70%),
+    radial-gradient(ellipse 70% 7% at 60% 80%, rgba(0, 125, 200, 0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 55% 9% at 85% 45%, rgba(0, 145, 235, 0.035) 0%, transparent 70%);
+  animation: oceanSwell 14s ease-in-out infinite;
 }
 .main-content.theme-ocean::after {
   content: '';
@@ -685,17 +673,16 @@ html, body, #root {
   z-index: -1;
   pointer-events: none;
   background:
-    /* Caustic light patches */
-    radial-gradient(ellipse 25% 15% at 20% 30%, rgba(0, 180, 255, 0.08) 0%, transparent 70%),
-    radial-gradient(ellipse 20% 12% at 55% 50%, rgba(0, 160, 240, 0.07) 0%, transparent 70%),
-    radial-gradient(ellipse 22% 14% at 80% 25%, rgba(60, 200, 255, 0.06) 0%, transparent 70%),
-    radial-gradient(ellipse 18% 10% at 35% 70%, rgba(0, 150, 230, 0.07) 0%, transparent 70%),
-    radial-gradient(ellipse 20% 13% at 70% 75%, rgba(30, 170, 255, 0.06) 0%, transparent 70%),
-    /* Downward light rays from surface */
-    linear-gradient(175deg, rgba(0,150,255,0.04) 0%, transparent 30%),
-    linear-gradient(168deg, rgba(0,120,220,0.03) 0%, transparent 25%),
-    linear-gradient(182deg, rgba(60,180,255,0.03) 0%, transparent 28%);
-  animation: oceanCaustics 12s ease-in-out infinite alternate;
+    /* Caustic light patches — soft, slow */
+    radial-gradient(ellipse 30% 18% at 20% 30%, rgba(0, 160, 240, 0.05) 0%, transparent 70%),
+    radial-gradient(ellipse 25% 15% at 55% 50%, rgba(0, 140, 220, 0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 28% 16% at 80% 25%, rgba(40, 180, 240, 0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 22% 12% at 35% 70%, rgba(0, 130, 210, 0.045) 0%, transparent 70%),
+    radial-gradient(ellipse 26% 14% at 70% 75%, rgba(20, 150, 235, 0.04) 0%, transparent 70%),
+    /* Faint surface light rays */
+    linear-gradient(175deg, rgba(0, 130, 230, 0.025) 0%, transparent 35%),
+    linear-gradient(168deg, rgba(0, 110, 200, 0.02) 0%, transparent 30%);
+  animation: oceanCaustics 18s ease-in-out infinite alternate;
 }
 .theme-ocean .channel-sidebar {
   border-right: 1px solid rgba(0, 120, 200, 0.1);
@@ -703,18 +690,18 @@ html, body, #root {
 .theme-ocean .message:hover {
   background: rgba(0, 140, 220, 0.04);
 }
-@keyframes oceanWaves1 {
-  0%   { background-position: 0px 0px, 0px 0px; }
-  25%  { background-position: 0px 12px, 0px -8px; }
-  50%  { background-position: 0px 24px, 0px -16px; }
-  75%  { background-position: 0px 12px, 0px -8px; }
-  100% { background-position: 0px 0px, 0px 0px; }
+@keyframes oceanSwell {
+  0%   { transform: translate(0, 0) skewY(0deg); }
+  20%  { transform: translate(2%, 3%) skewY(0.4deg); }
+  40%  { transform: translate(-1%, 6%) skewY(-0.3deg); }
+  60%  { transform: translate(1.5%, 3%) skewY(0.5deg); }
+  80%  { transform: translate(-0.5%, 1%) skewY(-0.2deg); }
+  100% { transform: translate(0, 0) skewY(0deg); }
 }
 @keyframes oceanCaustics {
-  0%   { opacity: 0.5; }
-  25%  { opacity: 0.85; }
-  50%  { opacity: 0.6; }
-  75%  { opacity: 0.9; }
+  0%   { opacity: 0.4; }
+  30%  { opacity: 0.6; }
+  60%  { opacity: 0.45; }
   100% { opacity: 0.55; }
 }
 
@@ -1196,6 +1183,13 @@ html, body, #root {
 
 .server-collapse-btn {
   margin-top: auto !important;
+  font-size: 0.9rem;
+  color: var(--text-muted) !important;
+  opacity: 0.5;
+}
+
+.server-collapse-btn:hover {
+  opacity: 1;
 }
 
 /* Channel Sidebar */
@@ -1229,8 +1223,8 @@ html, body, #root {
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 1.05rem;
-  padding: 6px 8px;
+  font-size: 1rem;
+  padding: 4px 8px;
   margin-left: -8px;
   border-radius: 4px;
   flex-shrink: 0;
@@ -1253,6 +1247,8 @@ html, body, #root {
 /* Drag-to-resize handles between sidebar panels */
 .resize-handle {
   width: 6px;
+  margin-left: -3px;
+  margin-right: -3px;
   flex-shrink: 0;
   cursor: col-resize;
   background: transparent;
@@ -1442,6 +1438,7 @@ html, body, #root {
   border-radius: 4px;
   cursor: pointer;
   text-align: left;
+  min-height: 33px;
 }
 
 .channel-item:hover {
@@ -1937,7 +1934,7 @@ html, body, #root {
   color: var(--text-muted);
   margin: 0 16px 8px;
   padding: 8px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--border);
 }
 
 .user-popover-actions {
@@ -1949,7 +1946,7 @@ html, body, #root {
 
 .user-popover-actions-divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--border);
   margin: 4px 4px;
 }
 
@@ -2153,6 +2150,7 @@ html, body, #root {
   gap: 8px;
   margin-top: auto;
   background: var(--bg-primary);
+  min-height: 69px;
 }
 
 .user-panel-info {
@@ -2638,7 +2636,7 @@ html, body, #root {
   flex: 1;
   display: flex;
   align-items: flex-end;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--bg-input);
   padding: 2px 4px;
@@ -2707,6 +2705,7 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 12px;
+  min-height: 49px;
 }
 
 .voice-header-name {
@@ -3127,9 +3126,9 @@ html, body, #root {
   background: none;
   border: none;
   color: var(--text-secondary);
-  font-size: 1.2rem;
+  font-size: 1rem;
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 2px 8px;
   border-radius: 4px;
   transition: color 0.2s, background 0.2s;
 }
@@ -3162,7 +3161,7 @@ html, body, #root {
   font-weight: 600;
   font-size: 0.9rem;
   color: var(--text-primary);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border);
   margin-bottom: 4px;
 }
 
@@ -3372,12 +3371,12 @@ html, body, #root {
 }
 
 .settings-nav-item:hover {
-  background: var(--bg-hover);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--text-primary);
 }
 
 .settings-nav-item.active {
-  background: var(--bg-hover);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--accent);
 }
 
@@ -3394,7 +3393,6 @@ html, body, #root {
   overflow-x: hidden;
   padding: 24px 40px;
   max-width: 900px;
-  margin: 0 auto;
   scrollbar-gutter: stable;
 }
 
@@ -3402,13 +3400,13 @@ html, body, #root {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
   position: sticky;
   top: -24px;
   z-index: 10;
-  background: var(--bg-secondary);
+  background: var(--bg-primary);
   padding: 24px 0 12px;
   margin: -24px 0 12px;
+  border-bottom: 1px solid var(--border);
 }
 
 .settings-content-header h2 {
@@ -3428,7 +3426,7 @@ html, body, #root {
 }
 
 .settings-content-header .close-btn:hover {
-  background: var(--bg-hover);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--text-primary);
 }
 
@@ -3445,12 +3443,20 @@ html, body, #root {
 }
 
 .settings-section {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   text-transform: uppercase;
   color: var(--text-muted);
   font-weight: 700;
-  letter-spacing: 0.05em;
-  margin-top: 8px;
+  letter-spacing: 0.06em;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-section:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
 }
 
 .settings-body select {
@@ -3732,13 +3738,13 @@ html, body, #root {
 }
 
 .chat-call-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
   border: none;
   background: var(--bg-tertiary);
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3957,6 +3963,7 @@ html, body, #root {
   display: flex;
   align-items: center;
   justify-content: center;
+  min-height: 38px;
 }
 
 .upload-btn:hover,
@@ -4259,6 +4266,7 @@ html, body, #root {
   overflow-y: auto;
   flex-shrink: 0;
   height: 100%;
+  padding-bottom: 69px;
 }
 
 .members-sidebar-wrapper {
@@ -4267,6 +4275,20 @@ html, body, #root {
   flex-shrink: 0;
   transition: width 0.25s ease;
   align-self: stretch;
+  position: relative;
+}
+
+.members-sidebar-wrapper.open::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 68px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .members-sidebar-wrapper.open {
@@ -4279,11 +4301,15 @@ html, body, #root {
 
 .members-sidebar-header {
   padding: 12px 16px;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 700;
   text-transform: uppercase;
   color: var(--text-muted);
   letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+  min-height: 49px;
+  display: flex;
+  align-items: center;
 }
 
 .members-role-header {
@@ -4694,7 +4720,7 @@ html, body, #root {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border, #3a3a5c);
+  border-bottom: 1px solid var(--border);
   font-weight: 600;
   font-size: 0.95rem;
 }
@@ -4716,7 +4742,7 @@ html, body, #root {
 }
 .history-entry {
   padding: 8px 16px;
-  border-bottom: 1px solid var(--border, #3a3a5c);
+  border-bottom: 1px solid var(--border);
 }
 .history-entry:last-child {
   border-bottom: none;
@@ -4803,7 +4829,7 @@ html, body, #root {
   color: var(--text-secondary);
   padding: 6px 16px;
   font-style: italic;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border);
   margin-bottom: 4px;
 }
 

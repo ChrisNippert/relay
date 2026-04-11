@@ -1109,7 +1109,7 @@ export default function SettingsPanel({ onClose }: Props) {
                 return (
                   <div className="camera-settings-grid">
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <h3 className="settings-section" style={{ margin: 0 }}>Camera Settings</h3>
+                      <h3 className="settings-section" style={{ border: 'none', margin: 0, padding: 0 }}>Camera Settings</h3>
                       <button className="settings-preview-btn" style={{ margin: 0, padding: '4px 12px', fontSize: 12 }} onClick={resetCameraToAuto}>Auto</button>
                     </div>
                     <p className="settings-hint">Adjust camera hardware settings. Availability depends on your camera and browser.</p>
@@ -1337,7 +1337,7 @@ export default function SettingsPanel({ onClose }: Props) {
               ))}
             </div>
 
-            <h3 className="settings-section" style={{ marginTop: 24 }}>
+            <h3 className="settings-section">
               {editingTheme ? (editingTheme.id.startsWith('custom-') && !customThemes.some((c) => c.id === editingTheme.id) ? 'Create Theme' : 'Edit Theme') : 'Create Theme'}
             </h3>
             {!editingTheme ? (
@@ -1471,7 +1471,7 @@ export default function SettingsPanel({ onClose }: Props) {
               </div>
             )}
 
-            <h3 className="settings-section" style={{ marginTop: 24 }}>Text</h3>
+            <h3 className="settings-section">Text</h3>
             <div className="text-settings">
               <div className="text-setting-row">
                 <label>Font</label>
@@ -1536,7 +1536,7 @@ export default function SettingsPanel({ onClose }: Props) {
               }}>Reset to Default</button>
             </div>
 
-            <h3 className="settings-section" style={{ marginTop: 24 }}>Preview</h3>
+            <h3 className="settings-section">Preview</h3>
             <div className="theme-live-preview" style={{
               fontFamily: textSettings.fontFamily + ", 'Noto Color Emoji'",
               fontSize: textSettings.fontSize,

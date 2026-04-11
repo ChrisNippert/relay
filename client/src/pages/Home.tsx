@@ -45,6 +45,7 @@ export default function Home() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [showMembers, setShowMembers] = useState(true)
   const [channelSidebarCollapsed, setChannelSidebarCollapsed] = useState(false)
+  const [serverListCollapsed, setServerListCollapsed] = useState(false)
   const [serverWidth, setServerWidth] = useState(160)
   const [channelWidth, setChannelWidth] = useState(240)
   const serverResizing = useRef(false)
@@ -674,6 +675,8 @@ export default function Home() {
         }}
         width={serverWidth}
         mobileOpen={mobilePanel === 'servers'}
+        collapsed={serverListCollapsed && !isMobile}
+        onToggleCollapse={() => setServerListCollapsed((p) => !p)}
       />
       <div className="resize-handle" onMouseDown={(e) => { e.preventDefault(); serverResizing.current = true; document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none' }} />
 

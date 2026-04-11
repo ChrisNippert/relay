@@ -1,15 +1,7 @@
 # NOTE - NEVER EDIT THIS FILE IT ONLY GETS EDITED BY HAND
 # BUGS
 <!-- * Align the server name with the channel name in the main pane -->
-* Sometimes test microphone doesn't work for some people even though they are able to talk in a voice chat.
-* If internet disconnects and reconnects, it drops me off a call and doesn't reconnect.
 
-* Camera preview should fit the space available instead of scrop to small square. maybe at least center it
-* Camera preview goes black while im shifting parameters
-* justify and cleanly space parameters in camera settings view
-
-* Screenshare button doesn't work on windows
-* 
 
 
 # QOL Stuff
@@ -98,3 +90,13 @@
 * EQ doesn't change anything that gets sent out, only what I hear of my own test mic
 * Be able to change audio bitrate
 * when I was watching a users camera, and they started to screenshare, their camera became "click to view" while there screenshare was viewable instantly
+
+* Sometimes test microphone doesn't work for some people even though they are able to talk in a voice chat.
+* If internet disconnects and reconnects, it drops me off a call and doesn't reconnect.
+
+* Camera preview should fit the space available instead of scrop to small square. maybe at least center it
+* Camera preview goes black while im shifting parameters
+* justify and cleanly space parameters in camera settings view
+
+* Screenshare button doesn't work on windows
+* The file and emoji areas of the text input are not vertically centered

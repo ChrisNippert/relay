@@ -22,11 +22,17 @@ interface Props {
   onReorder?: (serverIds: string[]) => void
   width?: number
   mobileOpen?: boolean
+  collapsed?: boolean
+  onToggleCollapse?: () => void
 }
 
 export type { DMEntry }
 
-export default function ServerList({ servers, selected, onSelect, onDMs, onCreate, isDMView, onJoinByCode, unreadDMs, onSelectDM, serverUnreads, onReorder, width, mobileOpen }: Props) {
+function getInitials(name: string): string {
+  return name.split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase()
+}
+
+export default function ServerList({ servers, selected, onSelect, onDMs, onCreate, isDMView, onJoinByCode, unreadDMs, onSelectDM, serverUnreads, onReorder, width, mobileOpen, collapsed, onToggleCollapse }: Props) {
   const [showModal, setShowModal] = useState<'create' | 'join' | null>(null)
   const [serverName, setServerName] = useState('')
   const [joinCode, setJoinCode] = useState('')
@@ -50,13 +56,13 @@ export default function ServerList({ servers, selected, onSelect, onDMs, onCreat
   }
 
   return (
-    <div className={`server-list${mobileOpen ? ' mobile-open' : ''}`} style={width ? { width } : undefined}>
+    <div className={`server-list${collapsed ? ' collapsed' : ''}${mobileOpen ? ' mobile-open' : ''}`} style={!collapsed && width ? { width } : undefined}>
       <button
         className={`server-nav-item dm-btn ${isDMView ? 'active' : ''}`}
         onClick={onDMs}
         title="Direct Messages"
       >
-        <span className="server-nav-label">DMs</span>
+        {collapsed ? <span className="server-nav-letter">DM</span> : <span className="server-nav-label">DMs</span>}
       </button>
 
       {unreadDMs && unreadDMs.length > 0 && (
@@ -68,7 +74,9 @@ export default function ServerList({ servers, selected, onSelect, onDMs, onCreat
               onClick={() => onSelectDM?.(dm.channel)}
               title={dm.name}
             >
-              <span className="server-nav-label">{dm.name}</span>
+              {collapsed
+                ? <span className="server-nav-letter">{getInitials(dm.name)}</span>
+                : <span className="server-nav-label">{dm.name}</span>}
               <span className={`server-nav-badge ${dm.mentioned ? 'mentioned' : ''}`}>{dm.unread}</span>
             </button>
           ))}
@@ -109,7 +117,9 @@ export default function ServerList({ servers, selected, onSelect, onDMs, onCreat
             }}
             onDragEnd={() => { dragIdxRef.current = null; setDragOverIdx(null) }}
           >
-            <span className="server-nav-label">{s.name}</span>
+            {collapsed
+              ? <span className="server-nav-letter">{getInitials(s.name)}</span>
+              : <span className="server-nav-label">{s.name}</span>}
             {unreads && unreads.count > 0 && (
               <span className={`server-nav-badge ${unreads.mentioned ? 'mentioned' : ''}`}>{unreads.count}</span>
             )}
@@ -120,6 +130,12 @@ export default function ServerList({ servers, selected, onSelect, onDMs, onCreat
       <button className="server-nav-item add" onClick={() => setShowModal('create')} title="Create or Join Server">
         +
       </button>
+
+      {onToggleCollapse && (
+        <button className="server-nav-item server-collapse-btn" onClick={onToggleCollapse} title={collapsed ? 'Expand Servers' : 'Collapse Servers'}>
+          {collapsed ? '»' : '«'}
+        </button>
+      )}
 
       {showModal && (
         <div className="server-modal-overlay" onClick={() => setShowModal(null)}>

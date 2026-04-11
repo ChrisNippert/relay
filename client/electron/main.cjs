@@ -60,10 +60,9 @@ function createWindow() {
     return { action: 'deny' }
   })
 
-  // Linux doesn't have a native screen picker for getDisplayMedia,
+  // Electron doesn't have a native screen picker for getDisplayMedia,
   // so intercept the request and show a custom source picker via IPC.
-  if (process.platform === 'linux') {
-    session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+  session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
       try {
         const sources = await desktopCapturer.getSources({
           types: ['screen', 'window'],
@@ -101,7 +100,6 @@ function createWindow() {
         callback()
       }
     })
-  }
 
   if (isDev) {
     const devUrl = process.env.ELECTRON_DEV_URL || 'http://localhost:5173'

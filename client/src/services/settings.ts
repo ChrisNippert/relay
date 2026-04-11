@@ -181,7 +181,7 @@ export const THEME_PRESETS: Theme[] = [
       '--text-muted': '#666680',
       '--accent': '#e94560',
       '--accent-hover': '#ff6b81',
-      '--border': '#2a2a4a',
+      '--border': '#2e2e52',
       '--success': '#4ecdc4',
       '--danger': '#e94560',
     },
