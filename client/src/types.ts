@@ -12,6 +12,8 @@ export interface User {
   name_color: string
   created_at: string
   updated_at: string
+  federated?: boolean
+  origin_url?: string
 }
 
 export interface Friendship {
@@ -27,6 +29,8 @@ export interface Server {
   name: string
   owner_id: string
   icon_url?: string
+  federated?: boolean
+  instance_url?: string
   created_at: string
   updated_at: string
 }
@@ -66,6 +70,7 @@ export interface Message {
   attachments?: Attachment[]
   author?: User
   edit_history?: MessageEdit[]
+  federated?: boolean
 }
 
 export interface MessageEdit {
@@ -135,4 +140,12 @@ export interface ServerInvite {
   uses: number
   expires_at?: string
   created_at: string
+}
+
+export interface FederatedServer {
+  server_id: string
+  server_name: string
+  server_icon?: string
+  instance_url: string
+  federated: boolean
 }

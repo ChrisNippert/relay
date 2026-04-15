@@ -128,6 +128,7 @@ export default function MembersSidebar({ serverId, onMessage, isAdmin }: Members
 
   const renderMember = (m: MemberInfo) => {
     const isOnline = onlineUserIds.has(m.user.id)
+    const isFederated = m.user.id.startsWith('fed:') || m.user.federated
     return (
       <div
         key={m.user.id}
@@ -141,6 +142,7 @@ export default function MembersSidebar({ serverId, onMessage, isAdmin }: Members
         >
           {m.user.display_name}
         </span>
+        {isFederated && <span className="member-fed-badge" title={`Federated${m.user.origin_url ? ' · ' + m.user.origin_url : ''}`}>🌐</span>}
         {m.member.role === 'admin' && <span className="member-admin-badge" title="Admin">★</span>}
       </div>
     )

@@ -2029,6 +2029,21 @@ html, body, #root {
   flex-shrink: 0;
 }
 
+/* Federation badges */
+.member-fed-badge {
+  font-size: 0.7rem;
+  margin-left: 4px;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.msg-fed-badge {
+  font-size: 0.65rem;
+  margin-left: 4px;
+  opacity: 0.6;
+  cursor: help;
+}
+
 /* Clickable author name */
 .message-author.clickable {
   cursor: pointer;

@@ -12,10 +12,11 @@ import (
 
 	"github.com/relay-chat/relay/internal/config"
 	"github.com/relay-chat/relay/internal/db"
+	"github.com/relay-chat/relay/internal/federation"
 	"github.com/relay-chat/relay/internal/ws"
 )
 
-func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
+func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub, fedHub *federation.Hub) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
@@ -44,6 +45,17 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
+
+	// Federation S2S WebSocket endpoint
+	if cfg.Federation.Enabled {
+		r.Get("/api/federation/ws", func(w http.ResponseWriter, r *http.Request) {
+			fedHub.AcceptPeer(w, r)
+		})
+		r.Get("/api/federation/info", FederationInfoHandler(cfg))
+		r.Post("/api/federation/resolve-invite", FederationResolveInviteHandler(cfg, database))
+		r.Get("/api/federation/servers/{serverID}/channels", FederationChannelsHandler(cfg, database))
+		r.Get("/api/federation/servers/{serverID}/members", FederationMembersHandler(cfg, database))
+	}
 
 	// Public routes with stricter rate limits
 	r.Post("/api/auth/register", RateLimitHandler(5, time.Minute, RegisterHandler(database, cfg)))
@@ -83,7 +95,7 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		r.Put("/api/servers/{serverID}", UpdateServerHandler(database))
 		r.Delete("/api/servers/{serverID}", DeleteServerHandler(database))
 		r.Post("/api/servers/{serverID}/leave", LeaveServerHandler(database, hub))
-		r.Get("/api/servers/{serverID}/members", GetMembersHandler(database))
+		r.Get("/api/servers/{serverID}/members", GetMembersHandler(database, cfg))
 		r.Get("/api/servers/{serverID}/online", GetOnlineUsersHandler(database, hub))
 		r.Put("/api/servers/{serverID}/members/{userID}/role", UpdateMemberRoleHandler(database, hub))
 		r.Delete("/api/servers/{serverID}/members/{userID}", KickMemberHandler(database, hub))
@@ -94,6 +106,11 @@ func NewRouter(cfg *config.Config, database *db.DB, hub *ws.Hub) http.Handler {
 		r.Get("/api/servers/{serverID}/invites", GetInvitesHandler(database))
 		r.Post("/api/invites/{code}/join", JoinByInviteHandler(database, hub))
 		r.Delete("/api/invites/{inviteID}", DeleteInviteHandler(database))
+
+		// Federated invite join
+		if cfg.Federation.Enabled {
+			r.Post("/api/federation/join", FederatedJoinHandler(cfg, database, hub, fedHub))
+		}
 
 		// Channels
 		r.Post("/api/servers/{serverID}/channels", CreateChannelHandler(database, hub))

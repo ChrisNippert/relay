@@ -1211,6 +1211,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                 <span className="message-author" style={m.author?.name_color ? { color: m.author.name_color } : undefined}>
                   {m.author?.display_name || 'Unknown'}
                 </span>
+                {(m.author?.federated || m.user_id.startsWith('fed:')) && <span className="msg-fed-badge" title={m.author?.origin_url || 'Federated user'}>🌐</span>}
                 <span className="message-time">{new Date(m.created_at).toLocaleString()}</span>
               </div>
               <div className="message-body">{renderMessageContent(m.content)}</div>
@@ -1294,6 +1295,7 @@ export default function ChatView({ channel, onStartCall, onDMUser, showMembersTo
                       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
                       setPopover({ userId: m.user_id, rect })
                     }}>{m.user_id === user?.id ? (user?.display_name ?? m.author?.display_name ?? m.user_id) : (m.author?.display_name ?? m.user_id)}</span>
+                    {(m.author?.federated || m.user_id.startsWith('fed:')) && <span className="msg-fed-badge" title={m.author?.origin_url || 'Federated user'}>🌐</span>}
                     <span className="message-time">{formatTime(m.created_at)}</span>
                   </div>
                 )}

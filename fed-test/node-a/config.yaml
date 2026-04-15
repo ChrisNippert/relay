@@ -1,0 +1,17 @@
+# Federation Test — Node A (port 3002)
+host: "0.0.0.0"
+port: "3002"
+database_path: "fed-test/node-a/relay.db"
+jwt_secret: ""
+upload_dir: "fed-test/node-a/uploads"
+max_upload_mb: 50
+static_dir: "client/dist"
+
+federation:
+  enabled: true
+  instance_url: "http://localhost:3002"
+  token: "node-a-secret"
+  peers:
+    - name: "node-b"
+      url: "http://localhost:3003"
+      token: "node-b-secret"

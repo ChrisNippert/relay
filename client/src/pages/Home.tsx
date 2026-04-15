@@ -583,6 +583,17 @@ export default function Home() {
 
   const handleJoinByCode = async (code: string) => {
     if (!code) return
+    // Detect federated invite format: CODE@https://remote-host
+    if (code.includes('@') && code.includes('://')) {
+      try {
+        const server = await api.federatedJoin(code)
+        setServers((prev) => prev.some((s) => s.id === server.id) ? prev : [...prev, server])
+        handleSelectServer(server)
+      } catch (e) {
+        alert('Failed to join federated server: ' + (e instanceof Error ? e.message : 'Unknown error'))
+      }
+      return
+    }
     try {
       const server = await api.joinByInvite(code)
       setServers((prev) => prev.some((s) => s.id === server.id) ? prev : [...prev, server])

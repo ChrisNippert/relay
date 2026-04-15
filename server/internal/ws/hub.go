@@ -8,23 +8,56 @@ import (
 	"github.com/relay-chat/relay/internal/db"
 )
 
+// FederationRelay defines the callback interface for relaying messages to federated peers.
+// This avoids an import cycle between ws and federation packages.
+type FederationRelay interface {
+	RelayMessage(serverID, channelID, messageID, content, nonce, msgType string, keyEpoch int, replyToID *string, authorID, username, displayName, avatarURL, nameColor, createdAt string)
+	RelayEdit(serverID, channelID, messageID, content, authorID, username, displayName, avatarURL, nameColor string)
+	RelayDelete(serverID, channelID, messageID string)
+	RelayTyping(serverID, channelID, authorID, username, displayName, avatarURL, nameColor string, started bool)
+	RelayPresence(userID, status string)
+	RelayDM(channelID, messageID, content, nonce, msgType, authorID, username, displayName, avatarURL, nameColor, createdAt string)
+	RelayVoiceState(serverID, channelID string, userIDs []string)
+	RelayCallSignal(serverID, channelID, fromUserID, targetUserID, signalType string, signal json.RawMessage)
+}
+
 type Hub struct {
-	db            *db.DB
-	clients       map[string]map[*Client]bool // userID -> set of active connections
-	voiceChannels map[string]map[string]bool  // channelID -> set of userIDs
-	register      chan *Client
-	unregister    chan *Client
-	mu            sync.RWMutex
+	db              *db.DB
+	clients         map[string]map[*Client]bool // userID -> set of active connections
+	voiceChannels   map[string]map[string]bool  // channelID -> set of local userIDs
+	fedVoiceUsers   map[string][]string         // channelID -> federated userIDs
+	federatedOnline map[string]bool             // remote federated userIDs currently online
+	register        chan *Client
+	unregister      chan *Client
+	mu              sync.RWMutex
+	fedRelay        FederationRelay
 }
 
 func NewHub(database *db.DB) *Hub {
 	return &Hub{
-		db:            database,
-		clients:       make(map[string]map[*Client]bool),
-		voiceChannels: make(map[string]map[string]bool),
-		register:      make(chan *Client),
-		unregister:    make(chan *Client),
+		db:              database,
+		clients:         make(map[string]map[*Client]bool),
+		voiceChannels:   make(map[string]map[string]bool),
+		fedVoiceUsers:   make(map[string][]string),
+		federatedOnline: make(map[string]bool),
+		register:        make(chan *Client),
+		unregister:      make(chan *Client),
 	}
+}
+
+// SetFederationHub stores the federation relay for message relay.
+func (h *Hub) SetFederationHub(relay FederationRelay) {
+	h.fedRelay = relay
+}
+
+// GetFederationRelay returns the federation relay.
+func (h *Hub) GetFederationRelay() FederationRelay {
+	return h.fedRelay
+}
+
+// GetDB returns the database reference.
+func (h *Hub) GetDB() *db.DB {
+	return h.db
 }
 
 func (h *Hub) Run() {
@@ -98,6 +131,11 @@ func (h *Hub) broadcastPresence(userID, status string) {
 			}
 		}
 	}
+
+	// Relay to federation peers
+	if h.fedRelay != nil {
+		h.fedRelay.RelayPresence(userID, status)
+	}
 }
 
 // sendPresenceSync sends the connecting client the online status of all related users.
@@ -108,7 +146,7 @@ func (h *Hub) sendPresenceSync(client *Client) {
 	defer h.mu.RUnlock()
 
 	for _, peerID := range peerIDs {
-		if len(h.clients[peerID]) > 0 {
+		if len(h.clients[peerID]) > 0 || h.federatedOnline[peerID] {
 			msg := WSMessage{
 				Type: "presence",
 				Payload: json.RawMessage(mustMarshal(map[string]string{
@@ -157,6 +195,19 @@ func (h *Hub) getRelatedUserIDs(userID string) []string {
 				if p != userID {
 					seen[p] = true
 				}
+			}
+		}
+	}
+
+	// Include federated members of shared servers
+	for _, s := range servers {
+		fedMembers, err := h.db.GetFederatedMembers(s.ID)
+		if err != nil {
+			continue
+		}
+		for _, fm := range fedMembers {
+			if fm.ID != userID {
+				seen[fm.ID] = true
 			}
 		}
 	}
@@ -281,15 +332,36 @@ func (h *Hub) VoiceLeave(channelID, userID string) {
 	}
 }
 
-// VoiceUsers returns the list of users in a voice channel.
+// VoiceUsers returns the list of users in a voice channel (local + federated).
 func (h *Hub) VoiceUsers(channelID string) []string {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	seen := make(map[string]bool)
 	var users []string
 	for uid := range h.voiceChannels[channelID] {
-		users = append(users, uid)
+		if !seen[uid] {
+			seen[uid] = true
+			users = append(users, uid)
+		}
+	}
+	for _, uid := range h.fedVoiceUsers[channelID] {
+		if !seen[uid] {
+			seen[uid] = true
+			users = append(users, uid)
+		}
 	}
 	return users
+}
+
+// SetFederatedVoiceUsers updates the federated voice user list for a channel.
+func (h *Hub) SetFederatedVoiceUsers(channelID string, userIDs []string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(userIDs) == 0 {
+		delete(h.fedVoiceUsers, channelID)
+	} else {
+		h.fedVoiceUsers[channelID] = userIDs
+	}
 }
 
 // VoiceLeaveAll removes a user from all voice channels (on disconnect).
@@ -329,9 +401,23 @@ func (h *Hub) IsUserOnline(userID string) bool {
 func (h *Hub) GetOnlineUserIDs() map[string]bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	online := make(map[string]bool, len(h.clients))
+	online := make(map[string]bool, len(h.clients)+len(h.federatedOnline))
 	for uid := range h.clients {
 		online[uid] = true
 	}
+	for uid := range h.federatedOnline {
+		online[uid] = true
+	}
 	return online
+}
+
+// SetFederatedOnline updates the online status of a federated remote user.
+func (h *Hub) SetFederatedOnline(userID string, online bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if online {
+		h.federatedOnline[userID] = true
+	} else {
+		delete(h.federatedOnline, userID)
+	}
 }

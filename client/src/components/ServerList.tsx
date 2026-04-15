@@ -190,11 +190,11 @@ export default function ServerList({ servers, selected, onSelect, onDMs, onCreat
                   className="server-modal-input"
                   value={joinCode}
                   onChange={(e) => setJoinCode(e.target.value)}
-                  placeholder="Enter invite code"
+                  placeholder="abc123 or code@https://remote.host"
                   autoFocus
                   onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
                 />
-                <p className="server-modal-hint">Enter an invite code to join an existing server.</p>
+                <p className="server-modal-hint">Enter an invite code, or use <code>CODE@URL</code> to join a federated server.</p>
                 <button
                   className="server-modal-submit"
                   onClick={handleJoin}

@@ -3,11 +3,14 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/relay-chat/relay/internal/config"
 	"github.com/relay-chat/relay/internal/db"
+	"github.com/relay-chat/relay/internal/models"
 	"github.com/relay-chat/relay/internal/ws"
 )
 
@@ -169,7 +172,68 @@ func LeaveServerHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
 	}
 }
 
-func GetMembersHandler(database *db.DB) http.HandlerFunc {
+// remoteMemberInfo is the shape returned by FederationMembersHandler.
+type remoteMemberInfo struct {
+	ID          string `json:"id"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name"`
+	AvatarURL   string `json:"avatar_url"`
+	NameColor   string `json:"name_color"`
+	Role        string `json:"role"`
+	Status      string `json:"status"`
+}
+
+// fetchAndCacheFederatedMembers fetches the member list from a remote instance,
+// caches them as remote_users locally, and returns ServerMember entries.
+func fetchAndCacheFederatedMembers(cfg *config.Config, database *db.DB, instanceURL, serverID string) []models.ServerMember {
+	var peerToken string
+	for _, p := range cfg.Federation.Peers {
+		if p.URL == instanceURL {
+			peerToken = p.Token
+			break
+		}
+	}
+	if peerToken == "" {
+		return nil
+	}
+
+	req, _ := http.NewRequest("GET", instanceURL+"/api/federation/servers/"+serverID+"/members", nil)
+	req.Header.Set("X-Federation-Token", peerToken)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	var remoteMembers []remoteMemberInfo
+	if err := json.NewDecoder(resp.Body).Decode(&remoteMembers); err != nil {
+		return nil
+	}
+
+	var members []models.ServerMember
+	for _, rm := range remoteMembers {
+		// Check if this is actually a local user (reflected back as a federated member)
+		if _, err := database.GetUserByID(rm.ID); err == nil {
+			// This is a local user — skip, they're already in server_members
+			continue
+		}
+
+		// Cache the remote user locally so getUser works
+		stripped := strings.TrimPrefix(strings.TrimPrefix(instanceURL, "https://"), "http://")
+		remoteUserID := "fed:" + stripped + ":" + rm.ID
+		database.UpsertRemoteUser(remoteUserID, instanceURL, rm.ID, rm.Username, rm.DisplayName, rm.AvatarURL, rm.NameColor)
+
+		members = append(members, models.ServerMember{
+			ServerID: serverID,
+			UserID:   remoteUserID,
+			Role:     rm.Role,
+		})
+	}
+	return members
+}
+
+func GetMembersHandler(database *db.DB, cfg *config.Config) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		serverID := chi.URLParam(r, "serverID")
 
@@ -179,10 +243,29 @@ func GetMembersHandler(database *db.DB) http.HandlerFunc {
 			return
 		}
 
+		// Start with local members
 		members, err := database.GetServerMembers(serverID)
 		if err != nil {
 			http.Error(w, `{"error":"failed to get members"}`, http.StatusInternalServerError)
 			return
+		}
+
+		// For federated mirror servers, also fetch members from the origin
+		server, sErr := database.GetServer(serverID)
+		if sErr == nil && server.Federated && server.InstanceURL != "" {
+			remoteMembers := fetchAndCacheFederatedMembers(cfg, database, server.InstanceURL, serverID)
+			members = append(members, remoteMembers...)
+		} else {
+			// For origin servers, include federated members
+			fedMembers, _ := database.GetFederatedMembers(serverID)
+			for _, fm := range fedMembers {
+				members = append(members, models.ServerMember{
+					ServerID: serverID,
+					UserID:   fm.ID,
+					Role:     "member",
+					JoinedAt: fm.CachedAt,
+				})
+			}
 		}
 
 		w.Header().Set("Content-Type", "application/json")

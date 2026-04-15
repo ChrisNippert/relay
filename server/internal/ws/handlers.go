@@ -218,6 +218,19 @@ func handleChatMessage(c *Client, payload json.RawMessage) {
 	}
 	data := mustMarshal(broadcastMsg)
 	c.hub.SendToChannel(p.ChannelID, data, "")
+
+	// Relay to federation peers if this is a server channel
+	ch, chErr := c.hub.db.GetChannel(p.ChannelID)
+	if chErr == nil && ch.ServerID != "" && c.hub.fedRelay != nil {
+		c.hub.fedRelay.RelayMessage(ch.ServerID, p.ChannelID, msgID, p.Content, p.Nonce, p.Type, p.KeyEpoch, p.ReplyToID,
+			c.userID, author.Username, author.DisplayName, author.AvatarURL, author.NameColor, msg.CreatedAt.Format("2006-01-02T15:04:05Z"))
+	}
+
+	// Relay DM messages to federated peers
+	if chErr == nil && ch.Type == "dm" && c.hub.fedRelay != nil {
+		c.hub.fedRelay.RelayDM(p.ChannelID, msgID, p.Content, p.Nonce, p.Type,
+			c.userID, author.Username, author.DisplayName, author.AvatarURL, author.NameColor, msg.CreatedAt.Format("2006-01-02T15:04:05Z"))
+	}
 }
 
 type editMessagePayload struct {
@@ -259,6 +272,13 @@ func handleEditMessage(c *Client, payload json.RawMessage) {
 	}
 	data := mustMarshal(broadcastMsg)
 	c.hub.SendToChannel(existing.ChannelID, data, "")
+
+	// Relay edit to federation
+	ch, chErr := c.hub.db.GetChannel(existing.ChannelID)
+	if chErr == nil && ch.ServerID != "" && c.hub.fedRelay != nil && author != nil {
+		c.hub.fedRelay.RelayEdit(ch.ServerID, existing.ChannelID, p.MessageID, p.Content,
+			c.userID, author.Username, author.DisplayName, author.AvatarURL, author.NameColor)
+	}
 }
 
 type deleteMessagePayload struct {
@@ -303,6 +323,12 @@ func handleDeleteMessage(c *Client, payload json.RawMessage) {
 	}
 	data := mustMarshal(broadcastMsg)
 	c.hub.SendToChannel(existing.ChannelID, data, "")
+
+	// Relay delete to federation
+	ch, chErr := c.hub.db.GetChannel(existing.ChannelID)
+	if chErr == nil && ch.ServerID != "" && c.hub.fedRelay != nil {
+		c.hub.fedRelay.RelayDelete(ch.ServerID, existing.ChannelID, p.MessageID)
+	}
 }
 
 type typingPayload struct {
@@ -335,6 +361,16 @@ func handleTyping(c *Client, payload json.RawMessage, started bool) {
 	}
 	data := mustMarshal(msg)
 	c.hub.SendToChannel(p.ChannelID, data, c.userID)
+
+	// Relay typing to federation
+	ch, chErr := c.hub.db.GetChannel(p.ChannelID)
+	if chErr == nil && ch.ServerID != "" && c.hub.fedRelay != nil {
+		author, _ := c.hub.db.GetUserByID(c.userID)
+		if author != nil {
+			c.hub.fedRelay.RelayTyping(ch.ServerID, p.ChannelID,
+				c.userID, author.Username, author.DisplayName, author.AvatarURL, author.NameColor, started)
+		}
+	}
 }
 
 type callSignalPayload struct {
@@ -353,6 +389,14 @@ func handleCallSignal(c *Client, signalType string, payload json.RawMessage) {
 	if p.ChannelID != "" {
 		hasAccess, err := c.hub.db.IsChannelParticipant(p.ChannelID, c.userID)
 		if err != nil || !hasAccess {
+			return
+		}
+	}
+
+	// If target is a federated user, relay through federation
+	if len(p.TargetUserID) > 4 && p.TargetUserID[:4] == "fed:" && c.hub.fedRelay != nil {
+		if ch, err := c.hub.db.GetChannel(p.ChannelID); err == nil && ch.ServerID != "" {
+			c.hub.fedRelay.RelayCallSignal(ch.ServerID, p.ChannelID, c.userID, p.TargetUserID, signalType, p.Signal)
 			return
 		}
 	}
@@ -433,6 +477,11 @@ func handleVoiceJoin(c *Client, payload json.RawMessage) {
 	}
 	data := mustMarshal(msg)
 	c.hub.SendToChannel(p.ChannelID, data, "")
+
+	// Relay to federation peers
+	if ch, err := c.hub.db.GetChannel(p.ChannelID); err == nil && ch.ServerID != "" && c.hub.fedRelay != nil {
+		c.hub.fedRelay.RelayVoiceState(ch.ServerID, p.ChannelID, users)
+	}
 }
 
 func handleVoiceLeave(c *Client, payload json.RawMessage) {
@@ -459,6 +508,11 @@ func handleVoiceLeave(c *Client, payload json.RawMessage) {
 	}
 	data := mustMarshal(msg)
 	c.hub.SendToChannel(p.ChannelID, data, "")
+
+	// Relay to federation peers
+	if ch, err := c.hub.db.GetChannel(p.ChannelID); err == nil && ch.ServerID != "" && c.hub.fedRelay != nil {
+		c.hub.fedRelay.RelayVoiceState(ch.ServerID, p.ChannelID, users)
+	}
 }
 
 func handleVoiceKick(c *Client, payload json.RawMessage) {

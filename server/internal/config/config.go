@@ -18,18 +18,32 @@ type ICEServer struct {
 	Credential string   `yaml:"credential,omitempty" json:"credential,omitempty"`
 }
 
+type FederationPeer struct {
+	Name  string `yaml:"name" json:"name"`
+	URL   string `yaml:"url" json:"url"`
+	Token string `yaml:"token" json:"token"`
+}
+
+type FederationConfig struct {
+	Enabled     bool             `yaml:"enabled" json:"enabled"`
+	InstanceURL string           `yaml:"instance_url" json:"instance_url"`
+	Token       string           `yaml:"token" json:"token"`
+	Peers       []FederationPeer `yaml:"peers" json:"peers"`
+}
+
 type Config struct {
-	Host           string      `yaml:"host"`
-	Port           string      `yaml:"port"`
-	DatabasePath   string      `yaml:"database_path"`
-	JWTSecret      string      `yaml:"jwt_secret"`
-	UploadDir      string      `yaml:"upload_dir"`
-	MaxUploadMB    int         `yaml:"max_upload_mb"`
-	TLSCert        string      `yaml:"tls_cert"`
-	TLSKey         string      `yaml:"tls_key"`
-	StaticDir      string      `yaml:"static_dir"`
-	AllowedOrigins []string    `yaml:"allowed_origins"`
-	ICEServers     []ICEServer `yaml:"ice_servers"`
+	Host           string           `yaml:"host"`
+	Port           string           `yaml:"port"`
+	DatabasePath   string           `yaml:"database_path"`
+	JWTSecret      string           `yaml:"jwt_secret"`
+	UploadDir      string           `yaml:"upload_dir"`
+	MaxUploadMB    int              `yaml:"max_upload_mb"`
+	TLSCert        string           `yaml:"tls_cert"`
+	TLSKey         string           `yaml:"tls_key"`
+	StaticDir      string           `yaml:"static_dir"`
+	AllowedOrigins []string         `yaml:"allowed_origins"`
+	ICEServers     []ICEServer      `yaml:"ice_servers"`
+	Federation     FederationConfig `yaml:"federation"`
 }
 
 var insecureDefaults = []string{

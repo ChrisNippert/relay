@@ -3,12 +3,14 @@ package models
 import "time"
 
 type Server struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	OwnerID   string    `json:"owner_id"`
-	IconURL   string    `json:"icon_url,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	OwnerID     string    `json:"owner_id"`
+	IconURL     string    `json:"icon_url,omitempty"`
+	Federated   bool      `json:"federated,omitempty"`
+	InstanceURL string    `json:"instance_url,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type ServerMember struct {

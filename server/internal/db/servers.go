@@ -52,19 +52,25 @@ func (db *DB) CreateServer(id, name, ownerID string) (*models.Server, error) {
 
 func (db *DB) GetServer(id string) (*models.Server, error) {
 	s := &models.Server{}
+	var federated int
+	var instanceURL *string
 	err := db.QueryRow(
-		`SELECT id, name, owner_id, icon_url, created_at, updated_at FROM servers WHERE id = ?`,
+		`SELECT id, name, owner_id, icon_url, COALESCE(federated,0), COALESCE(instance_url,''), created_at, updated_at FROM servers WHERE id = ?`,
 		id,
-	).Scan(&s.ID, &s.Name, &s.OwnerID, &s.IconURL, &s.CreatedAt, &s.UpdatedAt)
+	).Scan(&s.ID, &s.Name, &s.OwnerID, &s.IconURL, &federated, &instanceURL, &s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return nil, err
+	}
+	s.Federated = federated != 0
+	if instanceURL != nil {
+		s.InstanceURL = *instanceURL
 	}
 	return s, nil
 }
 
 func (db *DB) GetServersByUser(userID string) ([]models.Server, error) {
 	rows, err := db.Query(
-		`SELECT s.id, s.name, s.owner_id, s.icon_url, s.created_at, s.updated_at
+		`SELECT s.id, s.name, s.owner_id, s.icon_url, COALESCE(s.federated,0), COALESCE(s.instance_url,''), s.created_at, s.updated_at
 		 FROM servers s
 		 JOIN server_members sm ON s.id = sm.server_id
 		 WHERE sm.user_id = ?
@@ -79,9 +85,13 @@ func (db *DB) GetServersByUser(userID string) ([]models.Server, error) {
 	var servers []models.Server
 	for rows.Next() {
 		var s models.Server
-		if err := rows.Scan(&s.ID, &s.Name, &s.OwnerID, &s.IconURL, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		var federated int
+		var instanceURL string
+		if err := rows.Scan(&s.ID, &s.Name, &s.OwnerID, &s.IconURL, &federated, &instanceURL, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
+		s.Federated = federated != 0
+		s.InstanceURL = instanceURL
 		servers = append(servers, s)
 	}
 	return servers, rows.Err()

@@ -109,6 +109,8 @@ export const getInvites = (serverId: string) =>
   request<ServerInvite[]>('GET', `/servers/${encodeURIComponent(serverId)}/invites`)
 export const joinByInvite = (code: string) =>
   request<Server>('POST', `/invites/${encodeURIComponent(code)}/join`)
+export const federatedJoin = (inviteCode: string) =>
+  request<Server>('POST', '/federation/join', { invite_code: inviteCode })
 export const deleteInvite = (inviteId: string) =>
   request<void>('DELETE', `/invites/${encodeURIComponent(inviteId)}`)
 

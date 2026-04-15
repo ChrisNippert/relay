@@ -22,3 +22,13 @@ static_dir: "client/dist"
 #       - "turns:your-turn-server.com:5349"
 #     username: "your-username"
 #     credential: "your-password"
+
+# Federation: connect trusted Relay instances for cross-server chat.
+# federation:
+#   enabled: true
+#   instance_url: "https://your-relay.example.com"   # Public URL of this instance
+#   token: "shared-secret-for-incoming-peers"         # Token peers use to connect to us
+#   peers:
+#     - name: "friend-relay"
+#       url: "https://friend-relay.example.com"
+#       token: "their-shared-secret"                  # Token we use to connect to them

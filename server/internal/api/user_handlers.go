@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 
 	"github.com/go-chi/chi/v5"
 
@@ -50,7 +51,7 @@ func UpdateMeHandler(database *db.DB) http.HandlerFunc {
 
 func GetUserHandler(database *db.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		userID := chi.URLParam(r, "userID")
+		userID, _ := url.PathUnescape(chi.URLParam(r, "userID"))
 		user, err := database.GetUserByID(userID)
 		if err != nil {
 			http.Error(w, `{"error":"user not found"}`, http.StatusNotFound)
@@ -130,6 +131,14 @@ func GetOnlineUsersHandler(database *db.DB, hub *ws.Hub) http.HandlerFunc {
 		for _, m := range members {
 			if onlineMap[m.UserID] {
 				onlineIDs = append(onlineIDs, m.UserID)
+			}
+		}
+
+		// Also include federated members
+		fedMembers, _ := database.GetFederatedMembers(serverID)
+		for _, fm := range fedMembers {
+			if onlineMap[fm.ID] {
+				onlineIDs = append(onlineIDs, fm.ID)
 			}
 		}
 

@@ -63,6 +63,14 @@ func (db *DB) migrate() error {
 		`CREATE TABLE IF NOT EXISTS channel_master_keys (channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE, epoch INTEGER NOT NULL, device_id TEXT NOT NULL, encrypted_key TEXT NOT NULL, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (channel_id, epoch, device_id))`,
 		// Server ordering: per-user position for server list drag-reorder
 		`ALTER TABLE server_members ADD COLUMN position INTEGER DEFAULT 0`,
+		// Federation: remote users and federated members
+		`CREATE TABLE IF NOT EXISTS remote_users (id TEXT PRIMARY KEY, origin_url TEXT NOT NULL, remote_id TEXT NOT NULL, username TEXT NOT NULL, display_name TEXT DEFAULT '', avatar_url TEXT DEFAULT '', name_color TEXT DEFAULT '', cached_at DATETIME DEFAULT CURRENT_TIMESTAMP, UNIQUE(origin_url, remote_id))`,
+		`CREATE INDEX IF NOT EXISTS idx_remote_users_origin ON remote_users(origin_url, remote_id)`,
+		`CREATE TABLE IF NOT EXISTS federated_members (server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE, remote_user_id TEXT NOT NULL REFERENCES remote_users(id) ON DELETE CASCADE, role TEXT DEFAULT 'member', joined_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (server_id, remote_user_id))`,
+		`CREATE INDEX IF NOT EXISTS idx_federated_members_server ON federated_members(server_id)`,
+		// Federation: mark servers that are mirrors of remote federated servers
+		`ALTER TABLE servers ADD COLUMN federated INTEGER DEFAULT 0`,
+		`ALTER TABLE servers ADD COLUMN instance_url TEXT DEFAULT ''`,
 	}
 	for _, stmt := range alterations {
 		db.Exec(stmt) // intentionally ignore "duplicate column" errors
@@ -247,4 +255,26 @@ CREATE TABLE IF NOT EXISTS revoked_tokens (
     expires_at DATETIME NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires ON revoked_tokens(expires_at);
+
+CREATE TABLE IF NOT EXISTS remote_users (
+    id TEXT PRIMARY KEY,
+    origin_url TEXT NOT NULL,
+    remote_id TEXT NOT NULL,
+    username TEXT NOT NULL,
+    display_name TEXT DEFAULT '',
+    avatar_url TEXT DEFAULT '',
+    name_color TEXT DEFAULT '',
+    cached_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(origin_url, remote_id)
+);
+CREATE INDEX IF NOT EXISTS idx_remote_users_origin ON remote_users(origin_url, remote_id);
+
+CREATE TABLE IF NOT EXISTS federated_members (
+    server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+    remote_user_id TEXT NOT NULL REFERENCES remote_users(id) ON DELETE CASCADE,
+    role TEXT DEFAULT 'member',
+    joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (server_id, remote_user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_federated_members_server ON federated_members(server_id);
 `

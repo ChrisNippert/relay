@@ -9,6 +9,7 @@ import (
 	"github.com/relay-chat/relay/internal/api"
 	"github.com/relay-chat/relay/internal/config"
 	"github.com/relay-chat/relay/internal/db"
+	"github.com/relay-chat/relay/internal/federation"
 	"github.com/relay-chat/relay/internal/ws"
 )
 
@@ -40,7 +41,13 @@ func main() {
 	hub := ws.NewHub(database)
 	go hub.Run()
 
-	router := api.NewRouter(cfg, database, hub)
+	// Federation
+	fedHub := federation.NewHub(cfg, database)
+	federation.RegisterHandlers(fedHub, hub, database)
+	hub.SetFederationHub(&federation.Adapter{Hub: fedHub})
+	fedHub.Start()
+
+	router := api.NewRouter(cfg, database, hub, fedHub)
 
 	addr := cfg.Host + ":" + cfg.Port
 	if cfg.TLSCert != "" && cfg.TLSKey != "" {
